@@ -4544,6 +4544,15 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 				blockage += mapData->getBlock(type);
 			}
 		}
+	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
+
+	// open ufo doors are actually still closed behind the scenes
+	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
+	if (tile->isUfoDoorOpen(part))
+		blockage = 0;
+
+	return blockage;
+} // <-- А ЭТА СКОБКА ЗАКРЫВАЕТ САМУ ФУНКЦИЮ blockage!
 
 /**
  * Opens a door (if any) by rightclick, or by walking through it. The unit has to face in the right direction.
