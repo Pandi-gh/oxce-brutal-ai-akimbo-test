@@ -23,26 +23,21 @@ jobs:
       with:
         msystem: MINGW64
         update: true
+        # Возвращаем чистый список только самых главных библиотек
         install: >-
-          base-devel
-          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-gcc
           mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-make
+          mingw-w64-x86_64-yaml-cpp
           mingw-w64-x86_64-SDL
           mingw-w64-x86_64-SDL_mixer
           mingw-w64-x86_64-SDL_image
           mingw-w64-x86_64-SDL_gfx
-          mingw-w64-x86_64-yaml-cpp
-          mingw-w64-x86_64-glew
-          mingw-w64-x86_64-libmad
-          mingw-w64-x86_64-libvorbis
-          mingw-w64-x86_64-flac
-          mingw-w64-x86_64-libmodplug
-          mingw-w64-x86_64-libpng
-          mingw-w64-x86_64-libjpeg-turbo
-          mingw-w64-x86_64-libtiff
-          mingw-w64-x86_64-libwebp
-          mingw-w64-x86_64-zstd
-          mingw-w64-x86_64-xz
+
+    # МАГИЯ ЗДЕСЬ: Вырезаем команду, которая заставляла CMake ломать нам линковку
+    - name: Force Dynamic Linking
+      run: |
+        sed -i 's/CMAKE_FIND_LIBRARY_SUFFIXES/DISABLED_SUFFIXES/g' CMakeLists.txt
 
     - name: Create missing data directories
       run: |
@@ -51,22 +46,16 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
+    # Больше никаких гигантских строк с -lmad -lFLAC и т.д. Всё сработает автоматически!
     - name: Configure CMake
-      run: >
-        cmake -G "MinGW Makefiles" -B build 
-        -DCMAKE_BUILD_TYPE=Release 
-        -DCMAKE_FIND_LIBRARY_SUFFIXES=".dll.a;.a"
-        -DCMAKE_CXX_STANDARD_LIBRARIES="-lmad -lmodplug -lFLAC -lvorbisfile -lvorbis -logg -lpng16 -ljpeg -ltiff -lwebp -lsharpyuv -lzstd -llzma -lz -lbz2 -ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32"
+      run: cmake -G "MinGW Makefiles" -B build -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
       run: cmake --build build -j$(nproc)
 
     - name: Bundle required DLLs
       run: |
-        # Копируем все DLL, от которых зависит exe
         ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp -n {} build/bin/ || true
-        
-        # Базовые библиотеки C++ MinGW
         cp -n /mingw64/bin/libgcc_s_seh-1.dll build/bin/ || true
         cp -n /mingw64/bin/libstdc++-6.dll build/bin/ || true
         cp -n /mingw64/bin/libwinpthread-1.dll build/bin/ || true
