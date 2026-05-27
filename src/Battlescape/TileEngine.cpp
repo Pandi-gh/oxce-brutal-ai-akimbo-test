@@ -4508,47 +4508,42 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 
 		if (check)
 		{
-			// -1 means we have a regular wall, and anything over 0 means we have a bigwall.
-			if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
+			// ЛОГИКА ДЛЯ ДЫМА (применяется ко всем стенам и объектам)
+			if (type == DT_SMOKE && !tile->isUfoDoorOpen(part))
 			{
-				// Проверяем, насколько стена прозрачная (дырявая)
-				// 10 - глухая стена, 0 - стекло или сетка
-				int sightBlock = mapData->getLightBlock();
-
-				// Проверяем верхнюю половину объекта (высоту)
-				bool hasUpperHalf = false;
-				for (int loft = 6; loft < 12; ++loft)
+				// 1. Если объект прозрачный (окно, дырявый забор, решетка), 
+				// он не блокирует линию обзора (DT_NONE). Дым проходит свободно.
+				if (mapData->getBlock(DT_NONE) == 0)
 				{
-					if (mapData->getLoftID(loft) != 0)
+					// Ничего не делаем, blockage остается 0
+				}
+				else
+				{
+					// 2. Объект сплошной (стена, шкаф, дерево). Проверяем его высоту.
+					// loftID слоев 6-11 определяют верхнюю половину тайла
+					bool hasUpperHalf = false;
+					for (int loft = 6; loft < 12; ++loft)
 					{
-						hasUpperHalf = true;
-						break;
+						if (mapData->getLoftID(loft) != 0)
+						{
+							hasUpperHalf = true;
+							break;
+						}
 					}
+					
+					if (hasUpperHalf)
+					{
+						return 256; // Высокая сплошная стена блокирует дым
+					}
+					// Если верхней половины нет (низкий сплошной бордюр) - дым проходит
 				}
-				
-				// ЛОГИКА: Блокируем дым ТОЛЬКО если объект высокий И при этом глухой
-				// Значение > 4 отсекает окна, решетки, разбитые стены и сетчатые заборы
-				if (hasUpperHalf && sightBlock > 4)
-				{
-					return 256; // Высокая глухая стена полностью блокирует дым
-				}
-				
-				// Если мы дошли сюда, значит это либо низкий заборчик, либо окно/сетка.
-				// Даем дыму пройти, но немного тормозим его (штраф 3 единицы), 
-				// чтобы дым не пролетал сквозь заборы со скоростью света.
-				blockage += 3;
 			}
-			blockage += mapData->getBlock(type);
+			else
+			{
+				// СТАНДАРТНАЯ ЛОГИКА для огня, взрывов, пуль и т.д.
+				blockage += mapData->getBlock(type);
+			}
 		}
-	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
-
-	// open ufo doors are actually still closed behind the scenes
-	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
-	if (tile->isUfoDoorOpen(part))
-		blockage = 0;
-
-	return blockage;
-} // <-- А ЭТА СКОБКА ЗАКРЫВАЕТ САМУ ФУНКЦИЮ blockage!
 
 /**
  * Opens a door (if any) by rightclick, or by walking through it. The unit has to face in the right direction.
