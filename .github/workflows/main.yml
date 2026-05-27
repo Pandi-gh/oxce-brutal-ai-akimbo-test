@@ -8,7 +8,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-
+    
     defaults:
       run:
         shell: msys2 {0}
@@ -18,20 +18,21 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Setup MSYS2
+    - name: Setup MSYS2 and Dependencies
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
         update: true
         install: >-
-          mingw-w64-x86_64-gcc
+          base-devel
+          mingw-w64-x86_64-toolchain
           mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-make
-          mingw-w64-x86_64-SDL
-          mingw-w64-x86_64-SDL_mixer
-          mingw-w64-x86_64-SDL_image
-          mingw-w64-x86_64-SDL_gfx
           mingw-w64-x86_64-yaml-cpp
+          mingw-w64-x86_64-glew
+          mingw-w64-x86_64-SDL2
+          mingw-w64-x86_64-SDL2_image
+          mingw-w64-x86_64-SDL2_mixer
+          mingw-w64-x86_64-SDL2_gfx
 
     - name: Create missing data directories
       run: |
@@ -40,20 +41,19 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
-    # ИСПРАВЛЕНИЕ: Используем CMAKE_CXX_STANDARD_LIBRARIES, чтобы поставить библиотеки в конец!
-    # Добавлены -ldinput и -luuid, которые содержат недостающие GUID
     - name: Configure CMake
-      run: >
-        cmake -G "MinGW Makefiles" -B build 
-        -DCMAKE_BUILD_TYPE=Release 
-        -DCMAKE_CXX_STANDARD_LIBRARIES="-ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion"
+      # Флаги линковщика больше не нужны!
+      run: cmake -G "MinGW Makefiles" -B build -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
       run: cmake --build build -j$(nproc)
 
     - name: Bundle required DLLs
       run: |
+        # Автоматически копируем все DLL, от которых зависит наш exe (включая SDL2.dll)
         ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp -n {} build/bin/ || true
+        
+        # Базовые библиотеки C++ MinGW
         cp -n /mingw64/bin/libgcc_s_seh-1.dll build/bin/ || true
         cp -n /mingw64/bin/libstdc++-6.dll build/bin/ || true
         cp -n /mingw64/bin/libwinpthread-1.dll build/bin/ || true
