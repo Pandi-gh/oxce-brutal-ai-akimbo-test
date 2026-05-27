@@ -20,7 +20,7 @@ jobs:
       with:
         submodules: recursive
 
-    # 2. Устанавливаем среду MSYS2 и библиотеки (аналог apt-get, но для Windows)
+    # 2. Устанавливаем среду MSYS2 и библиотеки (ОБРАТИТЕ ВНИМАНИЕ: тут SDL версии 1.2)
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
@@ -30,10 +30,10 @@ jobs:
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-make
-          mingw-w64-x86_64-SDL2
-          mingw-w64-x86_64-SDL2_mixer
-          mingw-w64-x86_64-SDL2_image
-          mingw-w64-x86_64-SDL2_gfx
+          mingw-w64-x86_64-SDL
+          mingw-w64-x86_64-SDL_mixer
+          mingw-w64-x86_64-SDL_image
+          mingw-w64-x86_64-SDL_gfx
           mingw-w64-x86_64-yaml-cpp
 
     # 3. Создаем пустые папки
@@ -52,17 +52,10 @@ jobs:
     - name: Build
       run: cmake --build build -j$(nproc)
 
-    # 6. Копируем DLL файлы. Windows .exe файл не запустится без этих библиотек.
-    - name: Copy DLLs
+    # 6. Автоматическое копирование всех необходимых DLL к exe-файлу
+    - name: Bundle required DLLs
       run: |
-        cp /mingw64/bin/SDL2.dll build/bin/
-        cp /mingw64/bin/SDL2_mixer.dll build/bin/
-        cp /mingw64/bin/SDL2_image.dll build/bin/
-        cp /mingw64/bin/SDL2_gfx.dll build/bin/
-        cp /mingw64/bin/libyaml-cpp*.dll build/bin/
-        cp /mingw64/bin/libstdc++-6.dll build/bin/
-        cp /mingw64/bin/libgcc_s_seh-1.dll build/bin/
-        cp /mingw64/bin/libwinpthread-1.dll build/bin/
+        ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp {} build/bin/ || true
 
     # 7. Загружаем папку bin целиком (в ней будет .exe и все нужные .dll)
     - name: Upload artifact
