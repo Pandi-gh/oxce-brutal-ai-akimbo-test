@@ -4506,35 +4506,31 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			}
 		}
 
-		if (check)
-		{
-			// НОВАЯ ЛОГИКА ДЛЯ ДЫМА: Применяется ко всем объектам, а не только к диагональным
-			if (type == DT_SMOKE && !tile->isUfoDoorOpen(part))
-			{
-				int smokeBlock = mapData->getBlock(DT_SMOKE);
-				
-				// 1. Если в ruleset мода явно указано, что объект блокирует дым - блокируем
-				if (smokeBlock > 0)
-				{
-					return 256; 
-				}
-				
-				// 2. Если это сплошная стена (высота 24) и она блокирует линию обзора (LOS)
-				// DT_NONE (или 0) - это стандартная проверка на Line of Sight
-				if (mapData->getHeight() >= 24 && mapData->getBlock(DT_NONE) > 0)
-				{
-					return 256; // Сплошная высокая стена блокирует дым
-				}
-				
-				// 3. Во всех остальных случаях (низкие заборы, кусты, прозрачные объекты) 
-				// дым проходит свободно (ничего не возвращаем, blockage останется 0)
-			}
-			else
-			{
-				// Стандартная логика для огня, взрывов и пуль
-				blockage += mapData->getBlock(type);
-			}
-		}
+if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
+{
+    // Берем физическую непроходимость объекта (DT_NONE - это обычный физический блок)
+    // или значение блокировки обзора (getLightBlock)
+    int physicalBlock = mapData->getBlock(DT_NONE); 
+    int sightBlock = mapData->getLightBlock();
+
+    // Если объект имеет свой собственный показатель блокировки дыма - верим ему
+    if (mapData->getBlock(DT_SMOKE) > 0)
+    {
+        return 256;
+    }
+    // Если это полноценная высокая стена (полностью блокирует зрение или движение)
+    else if (physicalBlock > 12 || sightBlock > 8) 
+    {
+        return 256; // Высокая стена блокирует дым
+    }
+    else 
+    {
+        // Низкий заборчик! Даем дыму пройти, но слегка его тормозим
+        // Чтобы дым не летел сквозь забор со скоростью света
+        blockage += 5; 
+        return blockage; 
+    }
+}
 
 	// open ufo doors are actually still closed behind the scenes
 	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
