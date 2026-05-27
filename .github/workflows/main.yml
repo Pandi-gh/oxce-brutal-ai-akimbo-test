@@ -18,11 +18,13 @@ jobs:
       with:
         submodules: recursive
 
+    # 1. Включаем кэш для скачанных пакетов MSYS2
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
         update: true
+        cache: true # <--- ВКЛЮЧИЛИ КЭШ ПАКЕТОВ
         install: >-
           base-devel
           mingw-w64-x86_64-toolchain
@@ -46,6 +48,23 @@ jobs:
           mingw-w64-x86_64-jbigkit
           mingw-w64-x86_64-libdeflate
           mingw-w64-x86_64-lerc
+          mingw-w64-x86_64-ccache # <--- ДОБАВИЛИ УТИЛИТУ CCACHE
+
+    # 2. Восстанавливаем кэш компилятора с прошлого раза
+    - name: Setup ccache cache
+      uses: actions/cache@v4
+      with:
+        path: .ccache
+        key: ccache-windows-${{ github.sha }}
+        restore-keys: |
+          ccache-windows-
+
+    # 3. Настраиваем ccache
+    - name: Configure ccache
+      run: |
+        ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
+        ccache --max-size=1G
+        ccache -z
 
     - name: Create missing data directories
       run: |
@@ -54,23 +73,26 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
+    # 4. ИСПРАВЛЕНИЕ: Говорим CMake использовать ccache для файлов .c и .cpp
     - name: Configure CMake
       run: >
         cmake -G "MinGW Makefiles" -B build 
         -DCMAKE_BUILD_TYPE=Release 
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache 
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache 
         -DCMAKE_FIND_LIBRARY_SUFFIXES=".dll.a;.a"
         -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group -lSDL_mixer -lSDL_image -lSDL_gfx -lSDL -l:libFLAC.dll.a -lvorbisfile -lvorbis -logg -lmodplug -lmad -ltiff -lwebp -lsharpyuv -lLerc -ljbig -ldeflate -ljpeg -lpng16 -lzstd -llzma -lz -lbz2 -ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32 -Wl,--end-group"
 
     - name: Build
       run: cmake --build build -j$(nproc)
 
+    # 5. Выводим статистику (сколько файлов взято из кэша)
+    - name: Check ccache statistics
+      run: ccache -s
+
     - name: Bundle required DLLs
       run: |
-        # 1. Копируем базовые зависимости exe
         ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp -n {} build/bin/ || true
-        
-        # 2. ПРИНУДИТЕЛЬНО копируем аудио-декодеры для кастомной музыки (OGG, MP3, FLAC, MOD)
-        # SDL_mixer загружает их скрыто, поэтому ldd их не видит!
         cp -n /mingw64/bin/libmad-0.dll build/bin/ || true
         cp -n /mingw64/bin/libmpg123-0.dll build/bin/ || true
         cp -n /mingw64/bin/libvorbisfile-3.dll build/bin/ || true
@@ -80,8 +102,6 @@ jobs:
         cp -n /mingw64/bin/libmodplug-1.dll build/bin/ || true
         cp -n /mingw64/bin/libopusfile-0.dll build/bin/ || true
         cp -n /mingw64/bin/libopus-0.dll build/bin/ || true
-        
-        # 3. Базовые библиотеки C++ MinGW
         cp -n /mingw64/bin/libgcc_s_seh-1.dll build/bin/ || true
         cp -n /mingw64/bin/libstdc++-6.dll build/bin/ || true
         cp -n /mingw64/bin/libwinpthread-1.dll build/bin/ || true
