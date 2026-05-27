@@ -48,7 +48,7 @@ jobs:
           mingw-w64-x86_64-jbigkit
           mingw-w64-x86_64-libdeflate
           mingw-w64-x86_64-lerc
-          mingw-w64-x86_64-ccache # <--- ДОБАВИЛИ УТИЛИТУ CCACHE
+          mingw-w64-x86_64-ccache
 
     # 2. Восстанавливаем кэш компилятора с прошлого раза
     - name: Setup ccache cache
