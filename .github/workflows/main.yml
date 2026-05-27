@@ -8,39 +8,35 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    # Указываем, что все команды ниже должны выполняться в среде MSYS2 (MinGW)
+
+    # Указываем, что все команды bash должны выполняться внутри среды MSYS2
     defaults:
       run:
         shell: msys2 {0}
 
     steps:
+    # 1. Загружаем код
     - uses: actions/checkout@v4
       with:
         submodules: recursive
 
-    # Устанавливаем MSYS2 и все необходимые зависимости для компиляции под Windows
-    - name: Setup MSYS2 and Install Dependencies
+    # 2. Устанавливаем среду MSYS2 и библиотеки (аналог apt-get, но для Windows)
+    - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
         update: true
         install: >-
-          git
-          make
-          mingw-w64-x86_64-cmake
           mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-make
           mingw-w64-x86_64-SDL2
-          mingw-w64-x86_64-SDL2_gfx
-          mingw-w64-x86_64-SDL2_image
           mingw-w64-x86_64-SDL2_mixer
-          mingw-w64-x86_64-SDL
-          mingw-w64-x86_64-SDL_gfx
-          mingw-w64-x86_64-SDL_image
-          mingw-w64-x86_64-SDL_mixer
-          mingw-w64-x86_64-glew
+          mingw-w64-x86_64-SDL2_image
+          mingw-w64-x86_64-SDL2_gfx
           mingw-w64-x86_64-yaml-cpp
 
-    # Создаем пустые папки, чтобы CMake не ругался при копировании
+    # 3. Создаем пустые папки
     - name: Create missing data directories
       run: |
         mkdir -p bin/TFTD
@@ -48,24 +44,29 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
-    # Конфигурация (явно указываем генератор MinGW Makefiles)
+    # 4. Конфигурация (используем MinGW Makefiles)
     - name: Configure CMake
-      run: cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+      run: cmake -G "MinGW Makefiles" -B build -DCMAKE_BUILD_TYPE=Release
 
-    # Сборка
+    # 5. Сборка
     - name: Build
       run: cmake --build build -j$(nproc)
 
-    # КРИТИЧЕСКИ ВАЖНЫЙ ШАГ: Копируем все нужные DLL к exe-файлу
-    - name: Bundle required DLLs
+    # 6. Копируем DLL файлы. Windows .exe файл не запустится без этих библиотек.
+    - name: Copy DLLs
       run: |
-        # ldd проверяет, какие библиотеки нужны exe-файлу, а awk и xargs копируют их из папки MinGW в нашу папку build/bin
-        ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp {} build/bin/ || true
+        cp /mingw64/bin/SDL2.dll build/bin/
+        cp /mingw64/bin/SDL2_mixer.dll build/bin/
+        cp /mingw64/bin/SDL2_image.dll build/bin/
+        cp /mingw64/bin/SDL2_gfx.dll build/bin/
+        cp /mingw64/bin/libyaml-cpp*.dll build/bin/
+        cp /mingw64/bin/libstdc++-6.dll build/bin/
+        cp /mingw64/bin/libgcc_s_seh-1.dll build/bin/
+        cp /mingw64/bin/libwinpthread-1.dll build/bin/
 
-    # Загрузка артефакта
+    # 7. Загружаем папку bin целиком (в ней будет .exe и все нужные .dll)
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: OpenXcom-windows-build
-        # Загружаем всю папку bin, так как там теперь лежит и сам .exe, и все .dll
         path: build/bin/
