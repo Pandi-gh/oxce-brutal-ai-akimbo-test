@@ -10,29 +10,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. Загружаем код (включая сабмодули, если они есть)
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
+    # 2. Создаем пустые папки, которые требует CMake, чтобы избежать ошибки копирования
+    - name: Create missing data directories
+      run: |
+        mkdir -p bin/TFTD
+        mkdir -p bin/UFO
+        mkdir -p bin/common
+        mkdir -p bin/standard
+
+    # 3. Устанавливаем зависимости
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           cmake \
           libsdl1.2-dev \
+          libsdl2-dev \
           libsdl-mixer1.2-dev \
+          libsdl2-mixer-dev \
           libsdl-image1.2-dev \
+          libsdl2-image-dev \
           libsdl-gfx1.2-dev \
+          libsdl2-gfx-dev \
           libyaml-cpp-dev \
           libglew-dev \
           g++
 
+    # 4. Конфигурация
     - name: Configure CMake
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
+    # 5. Сборка
     - name: Build
       run: cmake --build build -j$(nproc)
 
+    # 6. Загрузка артефакта
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: OpenXcom-linux-build
-        path: build/src/openxcom
+        # Путь исправлен: файл находится в build/bin/
+        path: build/bin/openxcom
