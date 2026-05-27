@@ -11,7 +11,14 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4   # <--- Исправил на v4
+      uses: actions/checkout@v4
+
+    - name: Fix sloppy author flags
+      # Скрипт-санитар: ищет и удаляет линуксовый флаг из всех файлов настроек CMake, чтобы MSVC не ругался
+      run: |
+        Get-ChildItem -Include CMakeLists.txt,*.cmake -Recurse | ForEach-Object {
+          (Get-Content $_.FullName) -replace '-Wno-unused', '' | Set-Content $_.FullName
+        }
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
@@ -20,7 +27,7 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config Release
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v4   # <--- Исправил на v4
+      uses: actions/upload-artifact@v4
       with:
         name: Custom-OXCE-Exe
         path: ${{github.workspace}}/build/Release/*.exe
