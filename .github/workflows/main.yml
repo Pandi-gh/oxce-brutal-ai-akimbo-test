@@ -13,10 +13,28 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Download Dependencies
-      # 100% рабочая ссылка от создателя OXCE (Yankes)
+    - name: Download Dependencies (Bulletproof)
+      # Бронебойный перебор всех официальных ссылок OpenXcom
       run: |
-        Invoke-WebRequest -Uri "https://github.com/Yankes/OpenXcom/releases/download/v1.0.0/deps_vs2017.zip" -OutFile "deps.zip"
+        $urls = @(
+          "https://github.com/OpenXcom/OpenXcom/releases/download/deps/deps_vs2017.zip",
+          "https://github.com/OpenXcom/OpenXcom/releases/download/deps/deps.zip",
+          "https://github.com/MeridianOXC/OpenXcom/releases/download/deps/deps_vs2017.zip",
+          "https://github.com/MeridianOXC/OpenXcom/releases/download/deps/deps.zip"
+        )
+        $success = $false
+        foreach ($url in $urls) {
+          try {
+            Write-Host "Пробую скачать: $url ..."
+            Invoke-WebRequest -Uri $url -OutFile "deps.zip" -ErrorAction Stop
+            $success = $true
+            Write-Host "Успешно скачано!"
+            break
+          } catch {
+            Write-Host "Файл не найден, пробую следующую ссылку..."
+          }
+        }
+        if (-not $success) { throw "Критическая ошибка: ни одна ссылка не сработала!" }
         Expand-Archive -Path "deps.zip" -DestinationPath "deps"
 
     - name: Fix sloppy author flags
