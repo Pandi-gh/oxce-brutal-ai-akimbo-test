@@ -23,29 +23,18 @@ jobs:
       with:
         msystem: MINGW64
         update: true
+        # Устанавливаем только основные пакеты. Зависимости подтянутся автоматически!
         install: >-
           base-devel
           mingw-w64-x86_64-toolchain
           mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-pkgconf
           mingw-w64-x86_64-yaml-cpp
           mingw-w64-x86_64-glew
           mingw-w64-x86_64-SDL
           mingw-w64-x86_64-SDL_mixer
           mingw-w64-x86_64-SDL_image
           mingw-w64-x86_64-SDL_gfx
-          mingw-w64-x86_64-libmad
-          mingw-w64-x86_64-libvorbis
-          mingw-w64-x86_64-flac
-          mingw-w64-x86_64-libmodplug
-          mingw-w64-x86_64-libpng
-          mingw-w64-x86_64-libjpeg-turbo
-          mingw-w64-x86_64-libtiff
-          mingw-w64-x86_64-libwebp
-          mingw-w64-x86_64-zstd
-          mingw-w64-x86_64-xz
-          mingw-w64-x86_64-jbigkit
-          mingw-w64-x86_64-libdeflate
-          mingw-w64-x86_64-lerc
 
     - name: Create missing data directories
       run: |
@@ -54,20 +43,26 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
-    # ИСПРАВЛЕНИЕ: Используем -l:libFLAC.dll.a (с двоеточием!)
     - name: Configure CMake
-      run: >
-        cmake -G "MinGW Makefiles" -B build 
-        -DCMAKE_BUILD_TYPE=Release 
-        -DCMAKE_FIND_LIBRARY_SUFFIXES=".dll.a;.a"
-        -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group -lSDL_mixer -lSDL_image -lSDL_gfx -lSDL -l:libFLAC.dll.a -lvorbisfile -lvorbis -logg -lmodplug -lmad -ltiff -lwebp -lsharpyuv -lLerc -ljbig -ldeflate -ljpeg -lpng16 -lzstd -llzma -lz -lbz2 -ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32 -Wl,--end-group"
+      run: |
+        # pkg-config сам найдет все скрытые зависимости (FLAC, TIFF, PNG и т.д.)
+        PKG_LIBS=$(pkg-config --libs SDL_mixer SDL_image)
+        echo "Using pkg-config libs: $PKG_LIBS"
+        
+        cmake -G "MinGW Makefiles" -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_FIND_LIBRARY_SUFFIXES=".dll.a;.a" \
+          -DCMAKE_EXE_LINKER_FLAGS="$PKG_LIBS -Wl,-Bdynamic -ldxguid -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32"
 
     - name: Build
       run: cmake --build build -j$(nproc)
 
     - name: Bundle required DLLs
       run: |
+        # Копируем все DLL, от которых зависит exe
         ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp -n {} build/bin/ || true
+        
+        # Базовые библиотеки C++ MinGW
         cp -n /mingw64/bin/libgcc_s_seh-1.dll build/bin/ || true
         cp -n /mingw64/bin/libstdc++-6.dll build/bin/ || true
         cp -n /mingw64/bin/libwinpthread-1.dll build/bin/ || true
