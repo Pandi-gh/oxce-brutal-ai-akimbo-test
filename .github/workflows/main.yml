@@ -2,55 +2,37 @@ name: Build Custom OXCE
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Download Dependencies (Bulletproof)
-      # Бронебойный перебор всех официальных ссылок OpenXcom
+    - name: Install dependencies
       run: |
-        $urls = @(
-          "https://github.com/OpenXcom/OpenXcom/releases/download/deps/deps_vs2017.zip",
-          "https://github.com/OpenXcom/OpenXcom/releases/download/deps/deps.zip",
-          "https://github.com/MeridianOXC/OpenXcom/releases/download/deps/deps_vs2017.zip",
-          "https://github.com/MeridianOXC/OpenXcom/releases/download/deps/deps.zip"
-        )
-        $success = $false
-        foreach ($url in $urls) {
-          try {
-            Write-Host "Пробую скачать: $url ..."
-            Invoke-WebRequest -Uri $url -OutFile "deps.zip" -ErrorAction Stop
-            $success = $true
-            Write-Host "Успешно скачано!"
-            break
-          } catch {
-            Write-Host "Файл не найден, пробую следующую ссылку..."
-          }
-        }
-        if (-not $success) { throw "Критическая ошибка: ни одна ссылка не сработала!" }
-        Expand-Archive -Path "deps.zip" -DestinationPath "deps"
-
-    - name: Fix sloppy author flags
-      run: |
-        Get-ChildItem -Include CMakeLists.txt,*.cmake -Recurse | ForEach-Object {
-          (Get-Content $_.FullName) -replace '-Wno-unused', '' | Set-Content $_.FullName
-        }
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          libsdl2-dev \
+          libsdl2-mixer-dev \
+          libsdl2-image-dev \
+          libsdl2-gfx-dev \
+          libyaml-cpp-dev \
+          libglew-dev \
+          g++
 
     - name: Configure CMake
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{github.workspace}}/deps"
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config Release
+      run: cmake --build build -j$(nproc)
 
-    - name: Upload Artifact
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Custom-OXCE-Exe
-        path: ${{github.workspace}}/build/Release/*.exe
+        name: OpenXcom-linux-build
+        path: build/src/openxcom
