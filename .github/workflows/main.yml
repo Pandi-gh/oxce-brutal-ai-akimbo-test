@@ -54,12 +54,13 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
+    # ИСПРАВЛЕНИЕ ЗДЕСЬ: Вместо -lFLAC мы передаем прямой путь /mingw64/lib/libFLAC.dll.a
     - name: Configure CMake
       run: >
         cmake -G "MinGW Makefiles" -B build 
         -DCMAKE_BUILD_TYPE=Release 
         -DCMAKE_FIND_LIBRARY_SUFFIXES=".dll.a;.a"
-        -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group -lSDL_mixer -lSDL_image -lSDL_gfx -lSDL -lFLAC -lvorbisfile -lvorbis -logg -lmodplug -lmad -ltiff -lwebp -lsharpyuv -lLerc -ljbig -ldeflate -ljpeg -lpng16 -lzstd -llzma -lz -lbz2 -ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32 -Wl,--end-group"
+        -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group -lSDL_mixer -lSDL_image -lSDL_gfx -lSDL /mingw64/lib/libFLAC.dll.a -lvorbisfile -lvorbis -logg -lmodplug -lmad -ltiff -lwebp -lsharpyuv -lLerc -ljbig -ldeflate -ljpeg -lpng16 -lzstd -llzma -lz -lbz2 -ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32 -Wl,--end-group"
 
     - name: Build
       run: cmake --build build -j$(nproc)
