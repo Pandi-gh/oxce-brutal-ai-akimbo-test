@@ -4508,28 +4508,22 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 
 if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
 {
-    // Берем физическую непроходимость объекта (DT_NONE - это обычный физический блок)
-    // или значение блокировки обзора (getLightBlock)
-    int physicalBlock = mapData->getBlock(DT_NONE); 
-    int sightBlock = mapData->getLightBlock();
-
-    // Если объект имеет свой собственный показатель блокировки дыма - верим ему
-    if (mapData->getBlock(DT_SMOKE) > 0)
+    // Проверяем верхнюю половину объекта
+    // loftID слоев 6-11 определяют верхнюю половину тайла
+    bool hasUpperHalf = false;
+    for (int loft = 6; loft < 12; ++loft)
     {
-        return 256;
+        if (mapData->getLoftID(loft) != 0)
+        {
+            hasUpperHalf = true;
+            break;
+        }
     }
-    // Если это полноценная высокая стена (полностью блокирует зрение или движение)
-    else if (physicalBlock > 12 || sightBlock > 8) 
+    if (hasUpperHalf)
     {
-        return 256; // Высокая стена блокирует дым
+        return 256; // высокий объект блокирует дым
     }
-    else 
-    {
-        // Низкий заборчик! Даем дыму пройти, но слегка его тормозим
-        // Чтобы дым не летел сквозь забор со скоростью света
-        blockage += 5; 
-        return blockage; 
-    }
+    // низкий объект - дым проходит свободно
 }
 
 	// open ufo doors are actually still closed behind the scenes
