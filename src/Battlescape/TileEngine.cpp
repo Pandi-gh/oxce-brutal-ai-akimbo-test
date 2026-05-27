@@ -4511,10 +4511,17 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			// -1 means we have a regular wall, and anything over 0 means we have a bigwall.
 			if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
 			{
-				if (mapData->getLightBlock() > 0)
-				{
-					return 256;
-				}
+			    // БЫЛО: return 256; // любая стена блокирует дым полностью
+			    
+			    // СТАЛО: проверяем высоту объекта
+			    // Если объект низкий (занимает меньше половины тайла по высоте)
+			    // дым должен проходить через него
+			    int smokeBlock = mapData->getBlock(DT_SMOKE);
+			    if (smokeBlock > 0)
+			    {
+			        return 256; // высокая стена блокирует
+			    }
+			    // низкий объект - дым проходит
 			}
 			blockage += mapData->getBlock(type);
 		}
