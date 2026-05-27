@@ -1,0 +1,28 @@
+name: Build Custom OXCE
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch: # Позволяет запускать сборку кнопкой вручную
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Configure CMake
+      # Движок OXCE на Windows сам скачает нужные библиотеки (SDL, yaml-cpp) через CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Release
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: Custom-OXCE-Exe
+        # Ищем готовый экзешник в папке Release
+        path: ${{github.workspace}}/build/Release/*.exe
