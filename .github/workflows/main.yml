@@ -8,40 +8,31 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    
-    # Все команды bash будут выполняться внутри среды MSYS2
+
     defaults:
       run:
         shell: msys2 {0}
 
     steps:
-    # 1. Загружаем код
     - uses: actions/checkout@v4
       with:
         submodules: recursive
 
-    # 2. Устанавливаем MSYS2, компиляторы и ВСЕ версии SDL (1.2 и 2)
-    - name: Setup MSYS2 and Dependencies
+    - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
         update: true
         install: >-
-          base-devel
-          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-gcc
           mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-yaml-cpp
-          mingw-w64-x86_64-glew
+          mingw-w64-x86_64-make
           mingw-w64-x86_64-SDL
-          mingw-w64-x86_64-SDL_image
           mingw-w64-x86_64-SDL_mixer
+          mingw-w64-x86_64-SDL_image
           mingw-w64-x86_64-SDL_gfx
-          mingw-w64-x86_64-SDL2
-          mingw-w64-x86_64-SDL2_image
-          mingw-w64-x86_64-SDL2_mixer
-          mingw-w64-x86_64-SDL2_gfx
+          mingw-w64-x86_64-yaml-cpp
 
-    # 3. Создаем пустые папки, чтобы CMake не прерывал сборку
     - name: Create missing data directories
       run: |
         mkdir -p bin/TFTD
@@ -49,30 +40,22 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
-    # 4. Конфигурация
+    # ИСПРАВЛЕНИЕ ЗДЕСЬ: Добавлены флаги линковщика CMAKE_EXE_LINKER_FLAGS
     - name: Configure CMake
-      run: cmake -G "MinGW Makefiles" -B build -DCMAKE_BUILD_TYPE=Release
+      run: >
+        cmake -G "MinGW Makefiles" -B build 
+        -DCMAKE_BUILD_TYPE=Release 
+        -DCMAKE_EXE_LINKER_FLAGS="-ldxguid -ldinput8 -lwinmm -lole32 -loleaut32 -lversion -limm32"
 
-    # 5. Сборка
     - name: Build
       run: cmake --build build -j$(nproc)
 
-    # 6. Умное копирование ВСЕХ нужных DLL файлов
     - name: Bundle required DLLs
       run: |
-        # ldd проверяет все зависимости exe-файла, grep фильтрует только библиотеки MinGW, 
-        # а xargs копирует их в папку build/bin
         ldd build/bin/openxcom.exe | grep /mingw64/bin | awk '{print $3}' | xargs -I {} cp -n {} build/bin/ || true
-        
-        # Копируем базовые библиотеки C++ и потоков MinGW (на всякий случай)
-        cp -n /mingw64/bin/libgcc_s_seh-1.dll build/bin/ || true
-        cp -n /mingw64/bin/libstdc++-6.dll build/bin/ || true
-        cp -n /mingw64/bin/libwinpthread-1.dll build/bin/ || true
 
-    # 7. Загружаем артефакт
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: OpenXcom-windows-build
-        # Загружаем всю папку bin (там будет .exe и ~20-30 нужных .dll файлов)
         path: build/bin/
