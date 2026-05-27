@@ -4506,25 +4506,25 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			}
 		}
 
-if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
-{
-    // Проверяем верхнюю половину объекта
-    // loftID слоев 6-11 определяют верхнюю половину тайла
-    bool hasUpperHalf = false;
-    for (int loft = 6; loft < 12; ++loft)
-    {
-        if (mapData->getLoftID(loft) != 0)
-        {
-            hasUpperHalf = true;
-            break;
-        }
-    }
-    if (hasUpperHalf)
-    {
-        return 256; // высокий объект блокирует дым
-    }
-    // низкий объект - дым проходит свободно
-}
+		if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
+		{
+		    // Проверяем верхнюю половину объекта
+		    // loftID слоев 6-11 определяют верхнюю половину тайла
+		    bool hasUpperHalf = false;
+		    for (int loft = 6; loft < 12; ++loft)
+		    {
+		        if (mapData->getLoftID(loft) != 0)
+		        {
+		            hasUpperHalf = true;
+		            break;
+		        }
+		    }
+		    if (hasUpperHalf)
+		    {
+		        return 256; // высокий объект блокирует дым
+		    }
+		    // низкий объект - дым проходит свободно
+		}
 
 	// open ufo doors are actually still closed behind the scenes
 	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
