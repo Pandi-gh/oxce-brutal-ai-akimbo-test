@@ -4508,24 +4508,33 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 
 		if (check)
 		{
-			// -1 means we have a regular wall, and anything over 0 means we have a bigwall.
-			if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
+			// НОВАЯ ЛОГИКА ДЛЯ ДЫМА: Применяется ко всем объектам, а не только к диагональным
+			if (type == DT_SMOKE && !tile->isUfoDoorOpen(part))
 			{
-			    // БЫЛО: return 256; // любая стена блокирует дым полностью
-			    
-			    // СТАЛО: проверяем высоту объекта
-			    // Если объект низкий (занимает меньше половины тайла по высоте)
-			    // дым должен проходить через него
-			    int smokeBlock = mapData->getBlock(DT_SMOKE);
-			    if (smokeBlock > 0)
-			    {
-			        return 256; // высокая стена блокирует
-			    }
-			    // низкий объект - дым проходит
+				int smokeBlock = mapData->getBlock(DT_SMOKE);
+				
+				// 1. Если в ruleset мода явно указано, что объект блокирует дым - блокируем
+				if (smokeBlock > 0)
+				{
+					return 256; 
+				}
+				
+				// 2. Если это сплошная стена (высота 24) и она блокирует линию обзора (LOS)
+				// DT_NONE (или 0) - это стандартная проверка на Line of Sight
+				if (mapData->getHeight() >= 24 && mapData->getBlock(DT_NONE) > 0)
+				{
+					return 256; // Сплошная высокая стена блокирует дым
+				}
+				
+				// 3. Во всех остальных случаях (низкие заборы, кусты, прозрачные объекты) 
+				// дым проходит свободно (ничего не возвращаем, blockage останется 0)
 			}
-			blockage += mapData->getBlock(type);
+			else
+			{
+				// Стандартная логика для огня, взрывов и пуль
+				blockage += mapData->getBlock(type);
+			}
 		}
-	}
 
 	// open ufo doors are actually still closed behind the scenes
 	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
