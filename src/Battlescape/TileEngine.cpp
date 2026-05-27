@@ -4511,8 +4511,11 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			// -1 means we have a regular wall, and anything over 0 means we have a bigwall.
 			if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
 			{
-				// Проверяем верхнюю половину объекта
-				// loftID слоев 6-11 определяют верхнюю половину тайла
+				// Проверяем, насколько стена прозрачная (дырявая)
+				// 10 - глухая стена, 0 - стекло или сетка
+				int sightBlock = mapData->getLightBlock();
+
+				// Проверяем верхнюю половину объекта (высоту)
 				bool hasUpperHalf = false;
 				for (int loft = 6; loft < 12; ++loft)
 				{
@@ -4523,11 +4526,17 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 					}
 				}
 				
-				if (hasUpperHalf)
+				// ЛОГИКА: Блокируем дым ТОЛЬКО если объект высокий И при этом глухой
+				// Значение > 4 отсекает окна, решетки, разбитые стены и сетчатые заборы
+				if (hasUpperHalf && sightBlock > 4)
 				{
-					return 256; // высокий объект блокирует дым
+					return 256; // Высокая глухая стена полностью блокирует дым
 				}
-				// низкий объект - дым проходит свободно
+				
+				// Если мы дошли сюда, значит это либо низкий заборчик, либо окно/сетка.
+				// Даем дыму пройти, но немного тормозим его (штраф 3 единицы), 
+				// чтобы дым не пролетал сквозь заборы со скоростью света.
+				blockage += 3;
 			}
 			blockage += mapData->getBlock(type);
 		}
