@@ -1,44 +1,38 @@
-name: Build Custom OXCE (MSYS2)
+name: Build Custom OXCE
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Setup MSYS2 and Install Dependencies
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: MINGW64
-        update: true
-        install: >-
-          mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-make
-          mingw-w64-x86_64-SDL
-          mingw-w64-x86_64-SDL_mixer
-          mingw-w64-x86_64-SDL_image
-          mingw-w64-x86_64-SDL_gfx
-          mingw-w64-x86_64-yaml-cpp
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          libsdl2-dev \
+          libsdl2-mixer-dev \
+          libsdl2-image-dev \
+          libsdl2-gfx-dev \
+          libyaml-cpp-dev \
+          libglew-dev \
+          g++
 
     - name: Configure CMake
-      shell: msys2 {0}
-      # МАГИЯ ЗДЕСЬ: Принудительно отдаем Линкеру базовые библиотеки Windows и DirectX
-      run: cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-lwinmm -ldinput8 -ldxguid -lole32 -loleaut32 -limm32 -lversion"
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
-      shell: msys2 {0}
-      run: cmake --build build --config Release
+      run: cmake --build build -j$(nproc)
 
-    - name: Upload Artifact
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Custom-OXCE-Exe
-        path: build/*.exe
+        name: OpenXcom-linux-build
+        path: build/src/openxcom
