@@ -8,7 +8,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    
+
     defaults:
       run:
         shell: msys2 {0}
@@ -18,21 +18,20 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Setup MSYS2 and Dependencies
+    - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
         update: true
         install: >-
-          base-devel
-          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-gcc
           mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-yaml-cpp
-          mingw-w64-x86_64-glew
+          mingw-w64-x86_64-make
           mingw-w64-x86_64-SDL
-          mingw-w64-x86_64-SDL_image
           mingw-w64-x86_64-SDL_mixer
+          mingw-w64-x86_64-SDL_image
           mingw-w64-x86_64-SDL_gfx
+          mingw-w64-x86_64-yaml-cpp
 
     - name: Create missing data directories
       run: |
@@ -41,9 +40,13 @@ jobs:
         mkdir -p bin/common
         mkdir -p bin/standard
 
+    # ИСПРАВЛЕНИЕ: Используем CMAKE_CXX_STANDARD_LIBRARIES, чтобы поставить библиотеки в конец!
+    # Добавлены -ldinput и -luuid, которые содержат недостающие GUID
     - name: Configure CMake
-      # ЗДЕСЬ ГЛАВНОЕ ИЗМЕНЕНИЕ: Добавлен флаг -DCMAKE_EXE_LINKER_FLAGS
-      run: cmake -G "MinGW Makefiles" -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-ldxguid -ldinput -lsetupapi"
+      run: >
+        cmake -G "MinGW Makefiles" -B build 
+        -DCMAKE_BUILD_TYPE=Release 
+        -DCMAKE_CXX_STANDARD_LIBRARIES="-ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion"
 
     - name: Build
       run: cmake --build build -j$(nproc)
