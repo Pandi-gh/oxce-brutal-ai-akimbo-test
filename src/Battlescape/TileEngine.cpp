@@ -4506,25 +4506,32 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			}
 		}
 
-		if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
+		if (check)
 		{
-		    // Проверяем верхнюю половину объекта
-		    // loftID слоев 6-11 определяют верхнюю половину тайла
-		    bool hasUpperHalf = false;
-		    for (int loft = 6; loft < 12; ++loft)
-		    {
-		        if (mapData->getLoftID(loft) != 0)
-		        {
-		            hasUpperHalf = true;
-		            break;
-		        }
-		    }
-		    if (hasUpperHalf)
-		    {
-		        return 256; // высокий объект блокирует дым
-		    }
-		    // низкий объект - дым проходит свободно
+			// -1 means we have a regular wall, and anything over 0 means we have a bigwall.
+			if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
+			{
+				// Проверяем верхнюю половину объекта
+				// loftID слоев 6-11 определяют верхнюю половину тайла
+				bool hasUpperHalf = false;
+				for (int loft = 6; loft < 12; ++loft)
+				{
+					if (mapData->getLoftID(loft) != 0)
+					{
+						hasUpperHalf = true;
+						break;
+					}
+				}
+				
+				if (hasUpperHalf)
+				{
+					return 256; // высокий объект блокирует дым
+				}
+				// низкий объект - дым проходит свободно
+			}
+			blockage += mapData->getBlock(type);
 		}
+	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
 
 	// open ufo doors are actually still closed behind the scenes
 	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
@@ -4532,7 +4539,7 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 		blockage = 0;
 
 	return blockage;
-}
+} // <-- А ЭТА СКОБКА ЗАКРЫВАЕТ САМУ ФУНКЦИЮ blockage!
 
 /**
  * Opens a door (if any) by rightclick, or by walking through it. The unit has to face in the right direction.
