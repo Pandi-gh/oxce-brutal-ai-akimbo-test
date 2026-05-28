@@ -4534,6 +4534,7 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 					blockage += 3; // <--- И ДОБАВИТЬ ШТРАФ ЗДЕСЬ (дым цепляется за низкий заборчик)
 				}
 			}
+		}
 	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
 
 	// open ufo doors are actually still closed behind the scenes
