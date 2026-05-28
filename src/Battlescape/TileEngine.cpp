@@ -4537,7 +4537,7 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 				}
 				else
 				{
-					blockage += 3; // Низкий сплошной объект (бордюр, ящик) немного замедляет дым
+					blockage += 8; // Низкий сплошной объект (бордюр, ящик) немного замедляет дым
 				}
 			}
 		}
