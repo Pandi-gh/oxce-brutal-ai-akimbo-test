@@ -4543,6 +4543,7 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			// СТАНДАРТНАЯ ЛОГИКА для огня, взрывов, пуль и т.д.
 			blockage += mapData->getBlock(type);
 		}
+	}
 	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
 
 	// open ufo doors are actually still closed behind the scenes
