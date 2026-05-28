@@ -4533,9 +4533,12 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 				
 				if (hasUpperHalf)
 				{
-					return 256; // Высокая сплошная стена блокирует дым
+					return 256; // Высокая сплошная стена блокирует дым полностью
 				}
-				// Если верхней половины нет (низкий сплошной бордюр) - дым проходит
+				else
+				{
+					blockage += 3; // Низкий сплошной объект (бордюр, ящик) немного замедляет дым
+				}
 			}
 		}
 		else
