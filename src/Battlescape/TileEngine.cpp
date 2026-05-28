@@ -4509,41 +4509,31 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 		if (check)
 		{
 			// ЛОГИКА ДЛЯ ДЫМА (применяется ко всем стенам и объектам)
+			// ЛОГИКА ДЛЯ ДЫМА (применяется ко всем стенам и объектам)
 			if (type == DT_SMOKE && !tile->isUfoDoorOpen(part))
 			{
-				// 1. Если объект прозрачный (окно, дырявый забор, решетка), 
-				// он не блокирует линию обзора (DT_NONE). Дым проходит свободно.
+				// 1. Если объект прозрачный...
 				if (mapData->getBlock(DT_NONE) == 0)
 				{
-					// Ничего не делаем, blockage остается 0
+					blockage += 2; // <--- ДОБАВИТЬ ШТРАФ ЗДЕСЬ (дым цепляется за раму окна)
 				}
 				else
 				{
-					// 2. Объект сплошной (стена, шкаф, дерево). Проверяем его высоту.
-					// loftID слоев 6-11 определяют верхнюю половину тайла
+					// 2. Объект сплошной...
 					bool hasUpperHalf = false;
 					for (int loft = 6; loft < 12; ++loft)
 					{
-						if (mapData->getLoftID(loft) != 0)
-						{
-							hasUpperHalf = true;
-							break;
-						}
+						// ...
 					}
 					
 					if (hasUpperHalf)
 					{
-						return 256; // Высокая сплошная стена блокирует дым
+						return 256; 
 					}
-					// Если верхней половины нет (низкий сплошной бордюр) - дым проходит
+					
+					blockage += 3; // <--- И ДОБАВИТЬ ШТРАФ ЗДЕСЬ (дым цепляется за низкий заборчик)
 				}
 			}
-			else
-			{
-				// СТАНДАРТНАЯ ЛОГИКА для огня, взрывов, пуль и т.д.
-				blockage += mapData->getBlock(type);
-			}
-		}
 	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
 
 	// open ufo doors are actually still closed behind the scenes
