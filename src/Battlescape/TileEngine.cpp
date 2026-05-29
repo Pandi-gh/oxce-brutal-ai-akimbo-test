@@ -3805,6 +3805,7 @@ void TileEngine::explode(BattleActionAttack attack, Position center, int power, 
 	int power_;
 	std::map<Tile*, int> tilesAffected;
 	std::vector<BattleItem*> toRemove;
+	std::set<BattleUnit*> unitsHit1x1;
 	std::pair<std::map<Tile*, int>::iterator, bool> ret;
 
 	if (type->FireBlastCalc)
@@ -3872,38 +3873,59 @@ void TileEngine::explode(BattleActionAttack attack, Position center, int power, 
 						toRemove.clear();
 						if (bu)
 						{
-							if (dest->getPosition() == centetTile)
+							// ЗАЩИТА ОТ ДВОЙНОГО ПОПАДАНИЯ НА РАМПАХ
+							bool skipHit = false;
+							
+							// Проверяем только маленьких юнитов 1x1.
+							// Большие юниты (2x2) ДОЛЖНЫ получать урон несколько раз (ванильная механика).
+							if (bu->getArmor()->getSize() == 1)
 							{
-								// direct hit, similar to ground zero but AI will remember attacker, done for compatibility
-								hitUnit(attack, bu, Position(0, 0, 0), damage, type, rangeAtack);
-							}
-							else if (
-									(
-										Position::distance2dSq(dest->getPosition(), centetTile) < 4
-										&& dest->getPosition().z == centetTile.z
-									)
-									|| dest->getPosition().z > centetTile.z
-								)
-							{
-								// ground zero effect is in effect, or unit is above explosion
-								hitUnit(attack, bu, Position(0, 0, -1), damage, type, rangeAtack);
-							}
-							else
-							{
-								// directional damage relative to explosion position.
-								// units above the explosion will be hit in the legs, units lateral to or below will be hit in the torso
-								hitUnit(attack, bu, centetTile + Position(0, 0, 5) - dest->getPosition(), damage, type, rangeAtack);
+								if (unitsHit1x1.find(bu) != unitsHit1x1.end())
+								{
+									skipHit = true; // Юнит уже получил бафф/урон от этого взрыва
+								}
+								else
+								{
+									unitsHit1x1.insert(bu); // Запоминаем юнита
+								}
 							}
 
-							// Affect all items and units in inventory
-							const int itemDamage = bu->getOverKillDamage();
-							if (itemDamage > 0)
+							// Если мы еще не били этого юнита (или это танк 2x2)
+							if (!skipHit)
 							{
-								for (auto* bi : *bu->getInventory())
+								if (dest->getPosition() == centetTile)
 								{
-									if (!hitUnit(attack, bi->getUnit(), Position(0, 0, 0), itemDamage, type, rangeAtack) && type->getItemFinalDamage(itemDamage) > bi->getRules()->getArmor())
+									// direct hit, similar to ground zero but AI will remember attacker, done for compatibility
+									hitUnit(attack, bu, Position(0, 0, 0), damage, type, rangeAtack);
+								}
+								else if (
+										(
+											Position::distance2dSq(dest->getPosition(), centetTile) < 4
+											&& dest->getPosition().z == centetTile.z
+										)
+										|| dest->getPosition().z > centetTile.z
+									)
+								{
+									// ground zero effect is in effect, or unit is above explosion
+									hitUnit(attack, bu, Position(0, 0, -1), damage, type, rangeAtack);
+								}
+								else
+								{
+									// directional damage relative to explosion position.
+									// units above the explosion will be hit in the legs, units lateral to or below will be hit in the torso
+									hitUnit(attack, bu, centetTile + Position(0, 0, 5) - dest->getPosition(), damage, type, rangeAtack);
+								}
+
+								// Affect all items and units in inventory
+								const int itemDamage = bu->getOverKillDamage();
+								if (itemDamage > 0)
+								{
+									for (auto* bi : *bu->getInventory())
 									{
-										toRemove.push_back(bi);
+										if (!hitUnit(attack, bi->getUnit(), Position(0, 0, 0), itemDamage, type, rangeAtack) && type->getItemFinalDamage(itemDamage) > bi->getRules()->getArmor())
+										{
+											toRemove.push_back(bi);
+										}
 									}
 								}
 							}
