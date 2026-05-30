@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include <cmath>
 #include <algorithm>
 #include "ProjectileFlyBState.h"
 #include "ExplosionBState.h"
@@ -805,26 +806,82 @@ void ProjectileFlyBState::think()
 				}
 
 				int piercePowerDercement = 0;
+				int powerForHit = power; // Это значение пойдет в функцию отрисовки искры/взрыва
+
 				if (_projectileImpact == V_UNIT && tile->getOverlappingUnit(_parent->getSave()) && tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
-				{ // let use if-else instead of long spagetty ternary
+				{ 
+					// Попадание в юнита (оставляем ванильную механику)
 					piercePowerDercement = tile->getOverlappingUnit(_parent->getSave())->getArmor()->getArmor(SIDE_FRONT) + tile->getOverlappingUnit(_parent->getSave())->getHealth();
 				}
 				else
 				{
-					piercePowerDercement = tile->getMapData(tp)->getArmor();
+					// === НАША НОВАЯ БАЛЛИСТИКА ДЛЯ СТЕН ===
+					int wallArmor = tile->getMapData(tp)->getArmor();
+					float armorEffectiveness = _ammo->getRules()->getDamageType()->ArmorEffectiveness;
+					int currentBulletPower = _parent->getSave()->getBattleGame()->piercePower; // Текущая "масса/энергия" пули
+					
+					if (wallArmor == 255) 
+					{
+						// Неразрушаемый край карты - пуля исчезает
+						piercePowerDercement = currentBulletPower; 
+						powerForHit = power; 
+					}
+					else if (wallArmor == 0) 
+					{
+						// Воздух или стекло без брони - пуля летит свободно
+						piercePowerDercement = 0;
+						powerForHit = power;
+					}
+					else 
+					{
+						// Базовое торможение = Броня * Бронепробитие
+						float baseBrake = wallArmor * armorEffectiveness;
+						if (baseBrake <= 0.0f) baseBrake = 1.0f; // Защита от деления на 0
+						
+						if (currentBulletPower <= baseBrake) 
+						{
+							// === ВЕТКА А: ПУЛЯ ЗАСТРЯЛА В СТЕНЕ ===
+							piercePowerDercement = currentBulletPower; // Забираем всю оставшуюся энергию
+							
+							// RNG-УСТАЛОСТЬ (Шквальный огонь разрушает стену)
+							int destroyChance = std::round(((float)currentBulletPower / baseBrake) * 100.0f);
+							if (RNG::percent(destroyChance)) 
+							{
+								tile->destroy(tp, _parent->getSave()->getObjectiveType());
+							}
+							
+							powerForHit = 0; // Глушим оригинальный расчет урона, т.к. мы уже всё посчитали
+						} 
+						else 
+						{
+							// === ВЕТКА Б: ПУЛЯ ПРОБИЛА ПРЕГРАДУ НАВЫЛЕТ ===
+							// Ваша формула из Excel: Корень из соотношения Урона к Торможению
+							float ratio = (float)currentBulletPower / baseBrake;
+							float finalBrake = baseBrake / std::sqrt(ratio);
+							piercePowerDercement = std::round(finalBrake); // Потеря энергии (Торможение)
+							
+							// Урон забору (шок от пробития = Урон * (AP^2) )
+							int wallDamage = std::round((float)currentBulletPower * (armorEffectiveness * armorEffectiveness));
+							
+							if (wallDamage >= wallArmor) 
+							{
+								tile->destroy(tp, _parent->getSave()->getObjectiveType()); // Стена аннигилируется
+							}
+							
+							powerForHit = 0; // Глушим оригинальный расчет
+						}
+					}
 				}
 
+				// Вызов стандартной функции для отрисовки искры / взрыва
+				// Заменили 'power' на 'powerForHit', чтобы наша математика не конфликтовала с движком
 				_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
 					_ammo->getRules()->getPierceType() == 2
-					?
-					power
-					:
-					std::min(_parent->getSave()->getBattleGame()->piercePower, power),
+					? powerForHit
+					: std::min(_parent->getSave()->getBattleGame()->piercePower, powerForHit),
 					_ammo->getRules()->getDamageType()->isDirect()
-					?
-					_ammo->getRules()->getDamageType()
-					:
-					_parent->getMod()->getDamageType(dmgAOE));
+					? _ammo->getRules()->getDamageType()
+					: _parent->getMod()->getDamageType(dmgAOE));
 
 				_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
 
