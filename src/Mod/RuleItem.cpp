@@ -705,7 +705,7 @@ void RuleItem::load(const YAML::YamlNodeReader& node, Mod *mod, const ModScript&
 	}
 	if (_power > 0 && _pierceType == 0)
 	{
-		if (_damageType.ResistType == 1 && _damageType.ArmorEffectiveness <= 0.99f)
+		if (_damageType.ResistType == 1 && _damageType.ArmorEffectiveness <= 2.99f)
 		{
 			_pierceType = 1; // Автоматически включаем пробивание тушек и стен!
 		}
