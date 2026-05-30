@@ -806,77 +806,124 @@ void ProjectileFlyBState::think()
 				}
 
 			int piercePowerDercement = 0;
-			int powerForHit = power; // Это значение пойдет в функцию отрисовки искры/взрыва
+			int powerForHit = power; // По умолчанию для юнитов и ванилы
 
 			if (_projectileImpact == V_UNIT && tile->getOverlappingUnit(_parent->getSave()) && tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
 			{ 
-				// Попадание в юнита (оставляем ванильную механику)
+				// === ПОПАДАНИЕ В ЮНИТА (Оригинальная логика) ===
 				piercePowerDercement = tile->getOverlappingUnit(_parent->getSave())->getArmor()->getArmor(SIDE_FRONT) + tile->getOverlappingUnit(_parent->getSave())->getHealth();
+				// Для юнитов powerForHit остается равным power, чтобы движок сам нанес урон и отыграл кровь/искры
 			}
 			else
 			{
-				// === НАША НОВАЯ БАЛЛИСТИКА ДЛЯ СТЕН ===
-				int wallArmor = tile->getMapData(tp)->getArmor();
+				// === НАША НОВАЯ БАЛЛИСТИКА ДЛЯ ОКРУЖЕНИЯ ===
 				float armorEffectiveness = _ammo->getRules()->getDamageType()->ArmorEffectiveness;
 				
-				// Достаем родной множитель урона по местности
-				float terrainModifier = _ammo->getRules()->getDamageType()->ToTile; 
-
-				int currentBulletPower = _parent->getSave()->getBattleGame()->piercePower; // Текущая масса/энергия пули
-				
-				if (wallArmor == 255) 
+				if (armorEffectiveness <= 2.99f) 
 				{
-					// Неразрушаемый край карты - пуля исчезает
-					piercePowerDercement = currentBulletPower; 
-					powerForHit = power; 
-				}
-				else if (wallArmor == 0) 
-				{
-					// Воздух или стекло без брони - пуля летит свободно
-					piercePowerDercement = 0;
-					powerForHit = power;
-				}
-				else 
-				{
-					// Базовое торможение = Броня * Бронепробитие
-					float baseBrake = wallArmor * armorEffectiveness;
-					if (baseBrake <= 0.0f) baseBrake = 1.0f; // Защита от деления на 0
+					int wallArmor = tile->getMapData(tp)->getArmor();
+					int currentBulletPower = _parent->getSave()->getBattleGame()->piercePower; 
 					
-					if (currentBulletPower <= baseBrake) 
+					// 1. Достаем реальный ToTile из RuleDamageType (как ты нашел в .h файле)
+					float terrainMod = _ammo->getRules()->getDamageType()->ToTile;
+					if (terrainMod <= 0.0f) terrainMod = 1.0f; // Защита от 0
+
+					if (wallArmor == 255) 
 					{
-						// === ВЕТКА А: ПУЛЯ ЗАСТРЯЛА В СТЕНЕ ===
-						piercePowerDercement = currentBulletPower; // Забираем всю оставшуюся энергию
-						
-						// RNG-УСТАЛОСТЬ (Шквальный огонь разрушает стену)
-						int destroyChance = std::round(((float)currentBulletPower / baseBrake) * 100.0f);
-						if (RNG::percent(destroyChance)) 
-						{
-							tile->destroy(tp, _parent->getSave()->getObjectiveType());
-						}
-					} 
+						// Неразрушаемый край карты
+						piercePowerDercement = currentBulletPower; 
+						powerForHit = power; 
+					}
+					else if (wallArmor == 0) 
+					{
+						// Воздух/стекло без брони
+						piercePowerDercement = 0;
+						powerForHit = power;
+					}
 					else 
 					{
-						// === ВЕТКА Б: ПУЛЯ ПРОБИЛА ПРЕГРАДУ НАВЫЛЕТ ===
-						float ratio = (float)currentBulletPower / baseBrake;
-						float finalBrake = baseBrake / std::sqrt(ratio);
-						piercePowerDercement = std::round(finalBrake); 
+						// 2. Расчет базового торможения (потеря энергии пули)
+						float baseBrake = (wallArmor * armorEffectiveness) * 1.5f; 
+						if (baseBrake <= 0.0f) baseBrake = 1.0f; 
 						
-						// ФИЗИКА: Урон стене равен ЭНЕРГИИ, КОТОРУЮ ПОТЕРЯЛА ПУЛЯ (с учетом модификатора местности)
-						int wallDamage = std::round((float)piercePowerDercement * terrainModifier);
-						
-						if (wallDamage >= wallArmor) 
+						if (currentBulletPower <= baseBrake) 
 						{
-							tile->destroy(tp, _parent->getSave()->getObjectiveType()); 
-						}
-					}
+							// === ВЕТКА А: ПУЛЯ ЗАСТРЯЛА В СТЕНЕ ===
+							piercePowerDercement = currentBulletPower; 
+							
+							int destroyChance = std::round(((float)currentBulletPower / baseBrake) * 100.0f);
+							if (RNG::percent(destroyChance)) 
+							{
+								tile->destroy(tp, _parent->getSave()->getObjectiveType());
+							}
+						} 
+						else 
+						{
+							// === ВЕТКА Б: ПУЛЯ ПРОБИЛА ПРЕГРАДУ НАВЫЛЕТ ===
+							float ratio = (float)currentBulletPower / baseBrake;
+							float finalBrake = baseBrake / std::sqrt(ratio);
+							piercePowerDercement = std::round(finalBrake); 
+							
+							// 3. Расчет сырого урона стене
+							float rawWallDamage = 0;
+							if (armorEffectiveness < 1.0f) {
+								// Острая пуля (AP < 1.0): делает аккуратную дырку
+								rawWallDamage = (float)currentBulletPower * armorEffectiveness * 0.5f;
+							} else {
+								// Тупая пуля (AP >= 1.0): передает всю кинетику
+								rawWallDamage = (float)currentBulletPower * (armorEffectiveness * armorEffectiveness);
+							}
+							
+							// Применяем множитель ToTile!
+							int finalWallDamage = std::round(rawWallDamage * terrainMod);
 
-					// Заставляем движок рисовать искры на каждом препятствии, 
-					// передавая фактическую потерю энергии (но не менее 10, чтобы искра точно отрендерилась)
-					powerForHit = std::max(10, piercePowerDercement);
+							// 4. Логика разрушения: "Пуля прошла, стена устояла"
+							if (finalWallDamage >= wallArmor) 
+							{
+								// Урон превысил прочность - стена гарантированно ломается
+								tile->destroy(tp, _parent->getSave()->getObjectiveType()); 
+							}
+							else
+							{
+								// Урон меньше прочности. Шанс обрушения от структурной усталости.
+								int collapseChance = (finalWallDamage * 100) / wallArmor;
+								
+								// ЗАЩИТА ОТ НОНСЕНСА: Инопланетные сплавы (броня >= 60) почти immune к кинетике
+								// Шанс 15% превращается в 1.5% (округлится до 1%)
+								if (wallArmor >= 60) 
+								{
+									collapseChance = collapseChance / 10; 
+								}
+
+								if (RNG::percent(collapseChance)) 
+								{
+									tile->destroy(tp, _parent->getSave()->getObjectiveType());
+								}
+								// Если RNG не сработал - стена остается целой!
+							}
+						}
+						
+						// 5. Искры: Создаем вручную, чтобы они были ВСЕГДА при ударе о стену
+						// Это решает проблему исчезновения искр на 2-й и 3-й стене
+						if (_ammo->getRules()->getHitAnimation() != -1)
+						{
+							_parent->getMap()->getExplosions()->push_back(new Explosion(
+								_parent->getMap()->getProjectile()->getPosition(), 
+								_ammo->getRules()->getHitAnimation(), 
+								0, false, false, _ammo->getRules()->getHitAnimationFrames()
+							));
+						}
+						
+						// ГЛУШИМ стандартный урон движка по тайлам, чтобы не было двойного урона!
+						// Мы уже сами всё посчитали и вызвали tile->destroy() где нужно.
+						powerForHit = 0; 
+					}
 				}
+				// Если armorEffectiveness > 2.99f (лазеры, плазма), работает оригинальная ванильная логика (powerForHit остается = power)
 			}
 
-			// Вызов стандартной функции для отрисовки искры / взрыва
+			// Вызов стандартной функции
+			// Для кинетики по стенам powerForHit = 0, движок не нанесет доп. урон, но отработает другие эффекты
 			_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
 				_ammo->getRules()->getPierceType() == 2
 				? powerForHit
@@ -885,6 +932,7 @@ void ProjectileFlyBState::think()
 				? _ammo->getRules()->getDamageType()
 				: _parent->getMod()->getDamageType(dmgAOE));
 
+			// Отнимаем энергию у пули
 			_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
 
 				if (_projectileImpact == V_UNIT)
