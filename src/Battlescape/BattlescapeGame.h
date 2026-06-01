@@ -23,6 +23,8 @@
 #include "../Engine/HelperMeta.h"
 #include <string>
 #include <list>
+#include <map>
+#include <utility>
 #include <vector>
 
 namespace OpenXcom
@@ -174,6 +176,17 @@ public:
 	/// Reset by ProjectileFlyBState::createNewProjectile() for every new shot.
 	Position piercePrevTile = Position(-1, -1, -1);
 	int      piercePrevPart = -1;
+
+	/// pWWWa/test: accumulated "wear" damage from pierce pass-throughs (OUTCOME 1) per
+	/// (tile-encoded-id, tile-part) key. When the accumulated value reaches
+	/// tileArmor * PIERCE_DESTROY_MULTIPLIER, the obstacle is destroyed (OUTCOME 2) on
+	/// the next pierce hit. Survives within one battle only — not serialized.
+	/// Key: ((tile.z * 256 + tile.y) * 256 + tile.x, tilePart).
+	std::map<std::pair<int, int>, int> pierceWear;
+	/// pWWWa/test: how many "armor units" worth of pierce-through damage a tile takes
+	/// before it crumbles. 3 = a wall that loses ~33% of pierce capacity per hit needs
+	/// roughly 3 pass-throughs to fall. Increase for tougher pierce, decrease for softer.
+	static constexpr int PIERCE_DESTROY_MULTIPLIER = 3;
 
 	/// Creates the BattlescapeGame state.
 	BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState);
