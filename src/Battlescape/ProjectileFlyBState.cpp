@@ -1233,6 +1233,25 @@ void ProjectileFlyBState::think()
 				}
 			}
 
+			// pWWWa/test: pierce diagnostic — projectile end-of-life marker. Pairs with
+			// the [PIERCE] SHOT line from createNewProjectile() so it's obvious whether a
+			// shot really hit nothing (SHOT followed directly by END with no NEWs between)
+			// versus the rest of the log just being elsewhere on screen.
+			if (_ammo && _ammo->getRules()->getPierceType() && !_ammo->getRules()->getShotgunPellets())
+			{
+				const char* impactName =
+					(_projectileImpact == V_EMPTY)       ? "V_EMPTY"
+					: (_projectileImpact == V_FLOOR)     ? "V_FLOOR"
+					: (_projectileImpact == V_WESTWALL)  ? "V_WESTWALL"
+					: (_projectileImpact == V_NORTHWALL) ? "V_NORTHWALL"
+					: (_projectileImpact == V_OBJECT)    ? "V_OBJECT"
+					: (_projectileImpact == V_UNIT)      ? "V_UNIT"
+					: (_projectileImpact == V_OUTOFBOUNDS) ? "V_OUTOFBOUNDS"
+					: "?";
+				Log(LOG_INFO) << "[PIERCE] END  piercePowerLeft=" << _parent->getSave()->getBattleGame()->piercePower
+					<< " finalImpact=" << _projectileImpact << " (" << impactName << ')';
+			}
+
 			delete _parent->getMap()->getProjectile();
 			_parent->getMap()->setProjectile(0);
 		}
