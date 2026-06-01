@@ -168,6 +168,12 @@ public:
 	static bool _debugPlay;
 	/// current bullet pierce power
 	int piercePower = 0;
+	/// pWWWa/test: last terrain obstacle (tile + tile part) the current pierce bullet has
+	/// already paid pierce capacity for. Used to make sure we charge the bullet once per
+	/// obstacle instead of once per think() tick while it's still inside the same voxel.
+	/// Reset by ProjectileFlyBState::createNewProjectile() for every new shot.
+	Position piercePrevTile = Position(-1, -1, -1);
+	int      piercePrevPart = -1;
 
 	/// Creates the BattlescapeGame state.
 	BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState);
