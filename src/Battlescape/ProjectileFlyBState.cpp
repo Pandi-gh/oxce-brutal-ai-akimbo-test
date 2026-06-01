@@ -16,7 +16,6 @@
  * You should have received a copy of the GNU General Public License
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include <cmath>
 #include <algorithm>
 #include "ProjectileFlyBState.h"
 #include "ExplosionBState.h"
@@ -96,7 +95,7 @@ void ProjectileFlyBState::init()
 	_unit = _action.actor;
 
 	bool reactionShoot = _unit->getFaction() != _parent->getSave()->getSide();
-	if ((_action.type != BA_THROW) && (_action.type != BA_AKIMBOSHOT))
+	if (_action.type != BA_THROW)
 	{
 		_ammo = _action.weapon->getAmmoForAction(_action.type, reactionShoot ? nullptr : &_action.result);
 		if (!_ammo)
@@ -478,7 +477,8 @@ bool ProjectileFlyBState::createNewProjectile()
 	if ( _action.type == BA_AKIMBOSHOT )
 	{	// Remember original Active Hand weapon and ammo for hand iteration mechanism (ammo address need for projectile and impact "alignment")
 		BattleItem *originWeapon = const_cast<BattleItem*>(_unit->getActiveHand(_unit->getLeftHandWeapon(), _unit->getRightHandWeapon()));
-		BattleItem *originAmmo = originWeapon ? originWeapon->getAmmoForAction(_action.type) : 0; 
+		BattleItem* originAmmo = originWeapon ? originWeapon->getAmmoForAction(_action.type, _unit->getFaction() != _parent->getSave()->getSide() ? nullptr : &_action.result) : 0;
+
 		// Make possible remained shots (if it supposes) when weapon dissapeared and inactive hand asignes as active hand due ActiveHand result
 		if (originWeapon && originAmmo && !_unit->getOppositeHandWeapon() && _action.opWeaponCounter < _action.actWeaponShotQnty)
 		{
@@ -498,36 +498,24 @@ bool ProjectileFlyBState::createNewProjectile()
 		if (_action.actWeaponCounter >= _action.actWeaponShotQnty &&
 			_action.opWeaponCounter >= _action.opWeaponShotQnty)
 		{
-			_parent->popState();
-			// Lacks of weapon in any hand when shooting is finished - cancel action and return "normal" cursor
-			if (!originWeapon || !_unit->getOppositeHandWeapon())
-			{
-				_parent->cancelCurrentAction();
-				_parent->setupCursor();
-			}
 			return false;
 		}
 		// Hand switch mechanic of proper weapon (and ammo) usage each shot, if everything fine
-		if ( _action.actWeaponCounter < _action.actWeaponShotQnty &&
-			(_action.actWeaponCounter == _action.opWeaponCounter || _action.opWeaponCounter >= _action.opWeaponShotQnty) )
+		if (_action.actWeaponCounter < _action.actWeaponShotQnty &&
+			(_action.actWeaponCounter == _action.opWeaponCounter || _action.opWeaponCounter >= _action.opWeaponShotQnty))
 		{
 			++_action.actWeaponCounter;
 			_action.weapon = originWeapon;
 			_ammo = originAmmo;
 			_action.updateTU();
 		}
-		else if ( _action.opWeaponCounter < _action.opWeaponShotQnty &&
-			     (_action.actWeaponCounter > _action.opWeaponCounter || _action.actWeaponCounter >= _action.actWeaponShotQnty) )
+		else if (_action.opWeaponCounter < _action.opWeaponShotQnty &&
+				 (_action.actWeaponCounter > _action.opWeaponCounter || _action.actWeaponCounter >= _action.actWeaponShotQnty))
 		{
 			++_action.opWeaponCounter;
 			_action.weapon = _unit->getOppositeHandWeapon();
 			_ammo = _ammoOp;
 			_action.updateTU();
-		}
-		// allow player to reverse "spread" sequence with pressed "Alt" button (dynamic).
-		if ( _action.sprayTargeting && _parent->getSave()->isAltPressed(true) )
-		{
-			_action.waypoints.reverse();
 		}
 	}
 
@@ -636,7 +624,7 @@ bool ProjectileFlyBState::createNewProjectile()
 			// set the soldier in an aiming position
 			_unit->aim(true);
 			// and we have a lift-off
-			if (_ammo->getRules()->getFireSound() != Mod::NO_SOUND)
+			if (_ammo && _ammo->getRules()->getFireSound() != Mod::NO_SOUND)
 			{
 				_parent->getMod()->getSoundByDepth(_parent->getDepth(), _ammo->getRules()->getFireSound())->play(-1, _parent->getMap()->getSoundAngle(_unit->getPosition()));
 			}
@@ -679,11 +667,11 @@ bool ProjectileFlyBState::createNewProjectile()
 			// set the soldier in an aiming position
 			_unit->aim(true);
 			// and we have a lift-off
-			if (_ammo->getRules()->getFireSound() != Mod::NO_SOUND)
+			if (_ammo && _ammo->getRules()->getFireSound() != Mod::NO_SOUND)
 			{
 				_parent->getMod()->getSoundByDepth(_parent->getDepth(), _ammo->getRules()->getFireSound())->play(-1, _parent->getMap()->getSoundAngle(projectile->getOrigin()));
 			}
-			else if (_action.weapon->getRules()->getFireSound() != Mod::NO_SOUND)
+			else if (_action.weapon && _action.weapon->getRules()->getFireSound() != Mod::NO_SOUND)
 			{
 				_parent->getMod()->getSoundByDepth(_parent->getDepth(), _action.weapon->getRules()->getFireSound())->play(-1, _parent->getMap()->getSoundAngle(projectile->getOrigin()));
 			}
@@ -735,7 +723,12 @@ void ProjectileFlyBState::deinit()
 void ProjectileFlyBState::think()
 {
 	/// checks if a weapon has any more shots to fire.
-	auto noMoreShotsToShoot = [this]() { return !_action.weapon->haveNextShotsForAction(_action.type, _action.autoShotCounter) || !_action.weapon->getAmmoForAction(_action.type); };
+	auto noMoreShotsToShoot = [this]()
+		{
+		return _action.type != BA_AKIMBOSHOT
+			   ? (!_action.weapon->haveNextShotsForAction(_action.type, _action.autoShotCounter) || !_action.weapon->getAmmoForAction(_action.type))
+			   : (_action.actWeaponCounter >= _action.actWeaponShotQnty && _action.opWeaponCounter >= _action.opWeaponShotQnty);
+		};
 
 	_parent->getSave()->getBattleState()->clearMouseScrollingState();
 	/* TODO refactoring : store the projectile in this state, instead of getting it from the map each time? */
@@ -743,13 +736,12 @@ void ProjectileFlyBState::think()
 	{
 		bool hasFloor = _action.actor->haveNoFloorBelow() == false;
 		bool unitCanFly = _action.actor->getMovementType() == MT_FLY;
-		bool isAkimbo = _action.type == BA_AKIMBOSHOT;
 
-		if ( ( (!isAkimbo &&
-				_action.weapon->haveNextShotsForAction(_action.type, _action.autoShotCounter) &&
-				_ammo->getAmmoQuantity() != 0) ||
-				isAkimbo ) &&
-				!_action.actor->isOut() && (hasFloor || unitCanFly) )
+		if ( ( _action.type != BA_AKIMBOSHOT
+			? (_action.weapon->haveNextShotsForAction(_action.type, _action.autoShotCounter) && _ammo->getAmmoQuantity() != 0)
+			: (_action.actWeaponCounter < _action.actWeaponShotQnty || _action.opWeaponCounter < _action.opWeaponShotQnty ) )
+			&& !_action.actor->isOut()
+			&& (hasFloor || unitCanFly) )
 		{
 			createNewProjectile();
 			if (_action.cameraPosition.z != -1)
@@ -805,117 +797,59 @@ void ProjectileFlyBState::think()
 					power = _ammo->getRules()->getPowerBonus(attack) - _ammo->getRules()->getPowerRangeReduction(_parent->getMap()->getProjectile()->getDistance());
 				}
 
-			int piercePowerDercement = 0;
-			int powerForHit = power; // По умолчанию для юнитов
-
-			if (_projectileImpact == V_UNIT && tile->getOverlappingUnit(_parent->getSave()) && tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
-			{ 
-				// === ПОПАДАНИЕ В ЮНИТА (Оригинальная логика) ===
-				piercePowerDercement = tile->getOverlappingUnit(_parent->getSave())->getArmor()->getArmor(SIDE_FRONT) + tile->getOverlappingUnit(_parent->getSave())->getHealth();
-			}
-			else
-			{
-				// === НАША НОВАЯ БАЛЛИСТИКА ДЛЯ ОКРУЖЕНИЯ ===
-				float armorEffectiveness = _ammo->getRules()->getDamageType()->ArmorEffectiveness;
-				
-				// Применяем только к кинетике
-				if (armorEffectiveness <= 2.99f) 
+				int piercePowerDercement = 0;
+				// pWWWa/test: armor (durability) of the obstacle we are hitting (0 for units below)
+				int tileArmor = 0;
+				if (_projectileImpact == V_UNIT && tile->getOverlappingUnit(_parent->getSave()) && tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
+				{ // ternary used for avoiding possible zero devision (etc. damage modifier == 0)
+					piercePowerDercement = (tile->getOverlappingUnit(_parent->getSave())->getArmor()->getArmor(SIDE_FRONT) * _ammo->getRules()->getDamageType()->ArmorEffectiveness + tile->getOverlappingUnit(_parent->getSave())->getHealth()) /
+					( tile->getOverlappingUnit(_parent->getSave())->getArmor()->getDamageModifier(_ammo->getRules()->getDamageType()->ResistType)
+					? tile->getOverlappingUnit(_parent->getSave())->getArmor()->getDamageModifier(_ammo->getRules()->getDamageType()->ResistType)
+					: 1 );
+				}
+				else
 				{
-					int wallArmor = tile->getMapData(tp)->getArmor();
-					int currentBulletPower = _parent->getSave()->getBattleGame()->piercePower; 
-					
-					float terrainMod = _ammo->getRules()->getDamageType()->ToTile;
-					if (terrainMod <= 0.0f) terrainMod = 1.0f;
+					tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
+					piercePowerDercement = tileArmor /
+					( _ammo->getRules()->getDamageType()->ToTile
+					? _ammo->getRules()->getDamageType()->ToTile
+					: 1 );
+				}
 
-					if (wallArmor == 255) 
+				// pWWWa/test: actual power applied to this obstacle (capped by remaining pierce power for type 1)
+				int appliedPower = _ammo->getRules()->getPierceType() == 2
+					? power
+					: std::min(_parent->getSave()->getBattleGame()->piercePower, power);
+
+				_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
+					appliedPower,
+					_ammo->getRules()->getDamageType()->isDirect()
+					? _ammo->getRules()->getDamageType()
+					: _parent->getMod()->getDamageType(dmgAOE));
+
+				_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
+
+				// pWWWa/test: three-outcome resolution for terrain obstacles (units keep old handling)
+				if (_projectileImpact != V_UNIT)
+				{
+					bool willPenetrate  = _parent->getSave()->getBattleGame()->piercePower > 0; // enough power left to fly on
+					bool obstacleBroken = appliedPower >= tileArmor;                            // hit was strong enough to destroy it
+
+					if (!willPenetrate)
 					{
-						piercePowerDercement = currentBulletPower; 
-						powerForHit = power; 
+						// OUTCOME 3: bullet is stuck on the obstacle, damage already dealt, it will not fly further
+						// (Projectile::move() returns false on piercePower <= 0, so nothing else to do here)
 					}
-					else if (wallArmor == 0) 
+					else if (obstacleBroken)
 					{
-						piercePowerDercement = 0;
-						powerForHit = power;
+						// OUTCOME 2: bullet passes through AND destroys the obstacle, then flies on weakened
+						// hit() above already removes the map part when power >= armor via ToTile damage.
 					}
-					else 
+					else
 					{
-						// Базовое торможение
-						float baseBrake = (wallArmor * armorEffectiveness) * 1.5f; 
-						if (baseBrake <= 0.0f) baseBrake = 1.0f; 
-						
-						int destroyChance = 0;
-
-						if (currentBulletPower <= baseBrake) 
-						{
-							// === ВЕТКА А: ПУЛЯ ЗАСТРЯЛА В СТЕНЕ ===
-							piercePowerDercement = currentBulletPower; 
-							
-							// Тяжелые стены (НЛО, толстый бетон) игнорируют обрушение от мелкого калибра
-							if (wallArmor < 50) 
-							{
-								destroyChance = std::round(((float)currentBulletPower / baseBrake) * 100.0f);
-							}
-						} 
-						else 
-						{
-							// === ВЕТКА Б: ПУЛЯ ПРОБИЛА ПРЕГРАДУ НАВЫЛЕТ ===
-							float ratio = (float)currentBulletPower / baseBrake;
-							float finalBrake = baseBrake / std::sqrt(ratio);
-							piercePowerDercement = std::round(finalBrake); 
-							
-							if (armorEffectiveness < 1.0f) 
-							{
-								// Бронебойная пуля (AP < 1.0): делает аккуратную дырку.
-								// Шанс обрушения при пролете строго 0%.
-								destroyChance = 0;
-							} 
-							else 
-							{
-								// Обычная/тупая пуля: может разнести слабую стену
-								if (wallArmor < 40) // Только дерево, гипсокартон и т.д.
-								{
-									float rawWallDamage = (float)currentBulletPower * (armorEffectiveness * armorEffectiveness) * terrainMod;
-									
-									if (rawWallDamage >= wallArmor) 
-									{
-										destroyChance = 100;
-									}
-									else 
-									{
-										destroyChance = (rawWallDamage * 100) / wallArmor;
-										// Жесткий лимит: при пролете шанс не может быть больше 50%
-										destroyChance = std::min(destroyChance, 50); 
-									}
-								}
-							}
-						}
-
-						// Применяем шанс разрушения
-						if (destroyChance > 0 && RNG::percent(destroyChance)) 
-						{
-							tile->destroy(tp, _parent->getSave()->getObjectiveType());
-						}
-
-						// === ВИЗУАЛ (ИСКРЫ) ===
-						// Передаем 1. Движок умножит это на ToTile (например 0.5) и получит 0 урона.
-						// Но так как 1 > 0, движок ЧЕСТНО отрисует искру без микролагов и двойных эффектов!
-						powerForHit = 1; 
+						// OUTCOME 1: bullet passes through, loses energy, obstacle survives (current behaviour)
 					}
 				}
-				// Для плазмы/лазеров (AP > 2.99) powerForHit остается = power (ванильная логика)
-			}
-
-			// Вызов стандартной функции
-			_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
-				_ammo->getRules()->getPierceType() == 2
-				? powerForHit
-				: std::min(_parent->getSave()->getBattleGame()->piercePower, powerForHit),
-				_ammo->getRules()->getDamageType()->isDirect()
-				? _ammo->getRules()->getDamageType()
-				: _parent->getMod()->getDamageType(dmgAOE));
-
-			// Отнимаем энергию у пули
-			_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
 
 				if (_projectileImpact == V_UNIT)
 				{ // let arrange further handling of impacted units
@@ -933,7 +867,7 @@ void ProjectileFlyBState::think()
 			}
 			else 
 			{ // do not spawn hit animation at the end of map
-				_projectileImpact = _action.type == BA_LAUNCH && _action.waypoints.size() > 1 ? V_EMPTY: V_OUTOFBOUNDS;
+				_projectileImpact = _action.type == BA_LAUNCH && _action.waypoints.size() > 1 ? V_EMPTY : V_OUTOFBOUNDS;
 			}
 		}
 
