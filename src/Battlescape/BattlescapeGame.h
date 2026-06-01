@@ -184,9 +184,10 @@ public:
 	/// Key: ((tile.z * 256 + tile.y) * 256 + tile.x, tilePart).
 	std::map<std::pair<int, int>, int> pierceWear;
 	/// pWWWa/test: how many "armor units" worth of pierce-through damage a tile takes
-	/// before it crumbles. 3 = a wall that loses ~33% of pierce capacity per hit needs
-	/// roughly 3 pass-throughs to fall. Increase for tougher pierce, decrease for softer.
-	static constexpr int PIERCE_DESTROY_MULTIPLIER = 3;
+	/// before it crumbles. 1 = exactly one "wall HP" as in the Excel reference model
+	/// (recommended). Raise (2..5) to make pierce wear obstacles down slower without
+	/// touching the per-hit damage formula.
+	static constexpr int PIERCE_DESTROY_MULTIPLIER = 1;
 
 	/// Creates the BattlescapeGame state.
 	BattlescapeGame(SavedBattleGame *save, BattlescapeState *parentState);
