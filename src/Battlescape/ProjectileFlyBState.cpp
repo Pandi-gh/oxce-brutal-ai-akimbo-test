@@ -811,6 +811,10 @@ void ProjectileFlyBState::think()
 			const auto     dmgAOE = _ammo->getRules()->getPierceAOEDamageType();
 			auto*          bgame = _parent->getSave()->getBattleGame();
 
+			// pWWWa/test: floor (V_FLOOR) counts as a real obstacle too. Diagonal/vertical
+			// shots cross floors and roofs as legitimate pierce targets (think of firing
+			// down through a hole in the roof, or up through a second-storey floor).
+			// So the full V_FLOOR..V_UNIT range is in.
 			if (_projectileImpact >= V_FLOOR && _projectileImpact <= V_UNIT && bgame->piercePower > 0)
 			{
 				const Position obstacleTile = pos.toTile();
@@ -840,6 +844,7 @@ void ProjectileFlyBState::think()
 
 					// ----- pierce capacity cost for THIS obstacle -----
 					int piercePowerDecrement = 0;
+					int tileArmor            = 0; // for terrain wear bookkeeping below
 					if (_projectileImpact == V_UNIT
 						&& tile->getOverlappingUnit(_parent->getSave())
 						&& tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
@@ -853,7 +858,7 @@ void ProjectileFlyBState::think()
 					}
 					else
 					{
-						const int   tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
+						tileArmor             = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
 						const float toTile    = _ammo->getRules()->getDamageType()->ToTile;
 						piercePowerDecrement  = tileArmor / (toTile ? toTile : 1);
 					}
@@ -862,6 +867,61 @@ void ProjectileFlyBState::think()
 					const int appliedPower = (_ammo->getRules()->getPierceType() == 2)
 						? power
 						: std::min(bgame->piercePower, power);
+
+					// ----- terrain wear / destruction (OUTCOME 2) -----
+					// We accumulate appliedPower per (tile, part). When the accumulated wear
+					// reaches tileArmor * PIERCE_DESTROY_MULTIPLIER we destroy the part.
+					// Units are handled by the original randomized TileEngine::hit() below
+					// and do NOT participate in wear accumulation.
+					bool destroyedNow = false;
+					int  wearBefore   = 0;
+					int  wearAfter    = 0;
+					int  wearThreshold = 0;
+					if (_projectileImpact != V_UNIT && tileArmor > 0)
+					{
+						const int tileKey = (obstacleTile.z * 256 + obstacleTile.y) * 256 + obstacleTile.x;
+						const std::pair<int, int> key(tileKey, obstaclePart);
+
+						auto it = bgame->pierceWear.find(key);
+						wearBefore   = (it != bgame->pierceWear.end()) ? it->second : 0;
+						wearAfter    = wearBefore + appliedPower;
+						wearThreshold = tileArmor * BattlescapeGame::PIERCE_DESTROY_MULTIPLIER;
+
+						if (wearAfter >= wearThreshold)
+						{
+							destroyedNow = true;
+							bgame->pierceWear.erase(key); // tile is gone, wipe its counter
+
+							// ----- replicate the side effects of TileEngine::hit() for terrain -----
+							// 1) base-defense module bookkeeping (mirrors hit())
+							if (tp == O_OBJECT
+								&& _parent->getSave()->getMissionType() == "STR_BASE_DEFENSE"
+								&& tile->getMapData(O_OBJECT)
+								&& tile->getMapData(O_OBJECT)->isBaseModule())
+							{
+								auto& mm = _parent->getSave()->getModuleMap();
+								mm[(pos.x / 16) / 10][(pos.y / 16) / 10].second--;
+							}
+
+							// 2) damage with value >= armor -> Tile::damage() will destroy the part
+							if (tile->damage(tp, tileArmor, _parent->getSave()->getObjectiveType()))
+							{
+								_parent->getSave()->addDestroyedObjective();
+							}
+
+							// 3) refresh visibility / lighting / gravity after a real terrain change
+							_parent->getTileEngine()->applyGravity(tile);
+							LightLayers layer = (tp == O_FLOOR
+								&& _parent->getSave()->getTile(obstacleTile - Position(0, 0, 1)))
+								? LL_AMBIENT : LL_FIRE;
+							_parent->getTileEngine()->calculateLighting(layer, obstacleTile, 1, true);
+							_parent->getTileEngine()->calculateFOV(obstacleTile, 1, true, true);
+						}
+						else
+						{
+							bgame->pierceWear[key] = wearAfter;
+						}
+					}
 
 					if (_projectileImpact == V_UNIT)
 					{
@@ -872,16 +932,10 @@ void ProjectileFlyBState::think()
 								? _ammo->getRules()->getDamageType()
 								: _parent->getMod()->getDamageType(dmgAOE));
 					}
-					else
-					{
-						// Terrain (V_FLOOR / V_WESTWALL / V_NORTHWALL / V_OBJECT):
-						// OUTCOME 1 ONLY -> obstacle SURVIVES, projectile keeps flying with less energy.
-						// We intentionally do NOT call TileEngine::hit() / Tile::damage() here, so the
-						// tile graphics, line of sight and base-defense bookkeeping stay untouched.
-						// Side effects like smoke/fire from incendiary rounds are also skipped on
-						// purpose in this step — we want a clean "ghost pass-through" first, before
-						// we layer outcome #2 (destruction) and outcome #3 (stuck) on top.
-					}
+					// Terrain: nothing more to do here — either we already destroyed the part
+					// above, or it survives (OUTCOME 1). No randomized TileEngine::hit() call,
+					// so smoke/fire from incendiary rounds is still skipped at pass-through.
+					// Will revisit if/when we want incendiary pierce to set walls on fire.
 
 					// ----- spend pierce capacity AFTER applying effects -----
 					bgame->piercePower -= piercePowerDecrement;
@@ -891,6 +945,24 @@ void ProjectileFlyBState::think()
 					bgame->piercePrevPart = obstaclePart;
 
 					// ----- diagnostics (grep the log for "PIERCE") -----
+					const char* outcomeTag;
+					if (_projectileImpact == V_UNIT)
+					{
+						outcomeTag = " => UNIT HIT (randomized)";
+					}
+					else if (destroyedNow)
+					{
+						outcomeTag = " => TERRAIN OUTCOME 2 (PASS-THROUGH + DESTROYED)";
+					}
+					else if (bgame->piercePower > 0)
+					{
+						outcomeTag = " => TERRAIN OUTCOME 1 (PASS-THROUGH, obstacle SURVIVES)";
+					}
+					else
+					{
+						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED, obstacle SURVIVES — step 1 stub)";
+					}
+
 					Log(LOG_INFO) << "[PIERCE] NEW tile=(" << obstacleTile.x << ',' << obstacleTile.y << ',' << obstacleTile.z << ')'
 						<< " tilePart="        << obstaclePart
 						<< " ToTile="          << _ammo->getRules()->getDamageType()->ToTile
@@ -898,11 +970,8 @@ void ProjectileFlyBState::think()
 						<< " appliedPower="    << appliedPower
 						<< " decrement="       << piercePowerDecrement
 						<< " piercePowerLeft=" << bgame->piercePower
-						<< (_projectileImpact == V_UNIT
-							? " => UNIT HIT (randomized)"
-							: (bgame->piercePower > 0
-								? " => TERRAIN OUTCOME 1 (PASS-THROUGH, obstacle SURVIVES)"
-								: " => TERRAIN OUTCOME 3 (STOPPED, obstacle SURVIVES — step 1 stub)"));
+						<< " wear="            << wearAfter << '/' << wearThreshold
+						<< outcomeTag;
 
 					if (_projectileImpact == V_UNIT)
 					{ // let arrange further handling of impacted units
@@ -912,12 +981,14 @@ void ProjectileFlyBState::think()
 						_parent->convertInfected();
 						_parent->setStateInterval(BattlescapeState::DEFAULT_ANIM_SPEED / 5);
 					}
-					else
-					{ // step 1: terrain obstacles are not damaged, so there is nothing to chain-explode here.
-					  // Leave this disabled for now; revisit when outcome #2 is added.
-					  // if (tile->getSavedGame()->getTileEngine()->checkForTerrainExplosions())
-					  //     _parent->statePushNext(new ExplosionBState(_parent, proj->getLastPositions(),
-					  //         BattleActionAttack{BA_NONE, attack.attacker}, tile, false, 0, 0));
+					else if (destroyedNow)
+					{
+						// If the destroyed part was HE/explosive itself it might cascade.
+						if (tile->getSavedGame()->getTileEngine()->checkForTerrainExplosions())
+						{
+							_parent->statePushNext(new ExplosionBState(_parent, proj->getLastPositions(),
+								BattleActionAttack{ BA_NONE, attack.attacker }, tile, false, 0, 0));
+						}
 					}
 				}
 			}
