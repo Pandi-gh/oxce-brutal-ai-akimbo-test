@@ -778,134 +778,121 @@ void ProjectileFlyBState::think()
 	{
 		auto attack = BattleActionAttack::GetAferShoot(_action, _ammo);
 
-		// Pierce bullet handling injection (dirty hack)
-		if (_ammo && _ammo->getRules()->getPierceType() && !_ammo->getRules()->getShotgunPellets() && _parent->getMap()->getProjectile())
+		// pWWWa/test: pierce bullet handling.
+		//
+		// STEP 1 (this version): outcome #1 only for terrain — projectile passes through the
+		// obstacle, the obstacle STAYS INTACT, the bullet just loses pierce capacity (and the
+		// usual range-based power dropoff still applies). When piercePower drops to <=0 the
+		// loop in Projectile::move() halts the projectile and the normal "impact!" path below
+		// will spawn the final ExplosionBState on the tile where it actually stopped.
+		// Units (V_UNIT) keep the previous behaviour: a real randomized TileEngine::hit()
+		// (side armor, resistances, scripts, etc.).
+		if (_ammo && _ammo->getRules()->getPierceType()
+			&& !_ammo->getRules()->getShotgunPellets()
+			&& _parent->getMap()->getProjectile())
 		{
-			_projectileImpact = _parent->getTileEngine()->voxelCheck(_parent->getMap()->getProjectile()->getPosition(), _unit);
-			Tile* tile = _parent->getSave()->getTile(_parent->getMap()->getProjectile()->getPosition().toTile());
-			const auto tp = static_cast<TilePart>(_projectileImpact);
-			auto dmgAOE = _ammo->getRules()->getPierceAOEDamageType();
-			
-			if (_projectileImpact >= V_FLOOR && _projectileImpact <= V_UNIT && _parent->getSave()->getBattleGame()->piercePower > 0)
+			Projectile*    proj  = _parent->getMap()->getProjectile();
+			const Position pos   = proj->getPosition();
+			_projectileImpact    = _parent->getTileEngine()->voxelCheck(pos, _unit);
+
+			Tile*          tile  = _parent->getSave()->getTile(pos.toTile());
+			const auto     tp    = static_cast<TilePart>(_projectileImpact);
+			const auto     dmgAOE = _ammo->getRules()->getPierceAOEDamageType();
+			auto*          bgame = _parent->getSave()->getBattleGame();
+
+			if (_projectileImpact >= V_FLOOR && _projectileImpact <= V_UNIT && bgame->piercePower > 0)
 			{
+				// ----- raw projectile power at this distance -----
 				int power = 0;
 				if (_action.weapon->getRules()->getIgnoreAmmoPower())
-				{ // borrowed from shotgun section
-					power = _action.weapon->getRules()->getPowerBonus(attack) - _action.weapon->getRules()->getPowerRangeReduction(_parent->getMap()->getProjectile()->getDistance());
+				{
+					power = _action.weapon->getRules()->getPowerBonus(attack)
+						- _action.weapon->getRules()->getPowerRangeReduction(proj->getDistance());
 				}
 				else
 				{
-					power = _ammo->getRules()->getPowerBonus(attack) - _ammo->getRules()->getPowerRangeReduction(_parent->getMap()->getProjectile()->getDistance());
+					power = _ammo->getRules()->getPowerBonus(attack)
+						- _ammo->getRules()->getPowerRangeReduction(proj->getDistance());
 				}
 
-				int piercePowerDercement = 0;
-				// pWWWa/test: armor (durability) of the obstacle we are hitting (0 for units below)
-				int tileArmor = 0;
-				if (_projectileImpact == V_UNIT && tile->getOverlappingUnit(_parent->getSave()) && tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
-				{ // ternary used for avoiding possible zero devision (etc. damage modifier == 0)
-					piercePowerDercement = (tile->getOverlappingUnit(_parent->getSave())->getArmor()->getArmor(SIDE_FRONT) * _ammo->getRules()->getDamageType()->ArmorEffectiveness + tile->getOverlappingUnit(_parent->getSave())->getHealth()) /
-					( tile->getOverlappingUnit(_parent->getSave())->getArmor()->getDamageModifier(_ammo->getRules()->getDamageType()->ResistType)
-					? tile->getOverlappingUnit(_parent->getSave())->getArmor()->getDamageModifier(_ammo->getRules()->getDamageType()->ResistType)
-					: 1 );
+				// ----- pierce capacity cost for THIS obstacle -----
+				int piercePowerDecrement = 0;
+				if (_projectileImpact == V_UNIT
+					&& tile->getOverlappingUnit(_parent->getSave())
+					&& tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
+				{ // ternary used for avoiding possible zero division (e.g. damage modifier == 0)
+					BattleUnit* tgt   = tile->getOverlappingUnit(_parent->getSave());
+					const auto* dtype = _ammo->getRules()->getDamageType();
+					const float resist = tgt->getArmor()->getDamageModifier(dtype->ResistType);
+					piercePowerDecrement =
+						(tgt->getArmor()->getArmor(SIDE_FRONT) * dtype->ArmorEffectiveness + tgt->getHealth())
+						/ (resist ? resist : 1);
 				}
 				else
 				{
-					tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
-					piercePowerDercement = tileArmor /
-					( _ammo->getRules()->getDamageType()->ToTile
-					? _ammo->getRules()->getDamageType()->ToTile
-					: 1 );
+					const int   tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
+					const float toTile    = _ammo->getRules()->getDamageType()->ToTile;
+					piercePowerDecrement  = tileArmor / (toTile ? toTile : 1);
 				}
 
-				// pWWWa/test: actual power applied to this obstacle (capped by remaining pierce power for type 1)
-				int appliedPower = _ammo->getRules()->getPierceType() == 2
+				// ----- effective power applied to the obstacle -----
+				const int appliedPower = (_ammo->getRules()->getPierceType() == 2)
 					? power
-					: std::min(_parent->getSave()->getBattleGame()->piercePower, power);
-
-				// pWWWa/test: decide the outcome FIRST (deterministically), then act accordingly.
-				int piercePowerAfter = _parent->getSave()->getBattleGame()->piercePower - piercePowerDercement;
-				bool willPenetrate  = piercePowerAfter > 0;       // enough power left to fly on
-				bool obstacleBroken = appliedPower >= tileArmor;  // hit was strong enough to destroy it
+					: std::min(bgame->piercePower, power);
 
 				if (_projectileImpact == V_UNIT)
 				{
-					// units: keep the original randomized hit() handling
-					_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
-						appliedPower,
+					// Units: original randomized handling.
+					_parent->getSave()->getTileEngine()->hit(
+						attack, pos, appliedPower,
 						_ammo->getRules()->getDamageType()->isDirect()
-						? _ammo->getRules()->getDamageType()
-						: _parent->getMod()->getDamageType(dmgAOE));
+							? _ammo->getRules()->getDamageType()
+							: _parent->getMod()->getDamageType(dmgAOE));
 				}
 				else
 				{
-					// pWWWa/test: terrain obstacles are handled DETERMINISTICALLY here so that
-					// the logged OUTCOME always matches what happens on the map.
-					// We do NOT call the randomized TileEngine::hit() for terrain anymore, because
-					// its internal RNG (power * ToTile * random) decided tile destruction independently.
-					if (obstacleBroken)
-					{
-						// guarantee destruction: pass a value >= armor so Tile::damage() destroys the part
-						if (tile->damage(tp, tileArmor, _parent->getSave()->getObjectiveType()))
-						{
-							_parent->getSave()->addDestroyedObjective();
-						}
-					}
-					// outcome 1 / 3: leave the tile standing (no destruction applied)
+					// Terrain (V_FLOOR / V_WESTWALL / V_NORTHWALL / V_OBJECT):
+					// OUTCOME 1 ONLY -> obstacle SURVIVES, projectile keeps flying with less energy.
+					// We intentionally do NOT call TileEngine::hit() / Tile::damage() here, so the
+					// tile graphics, line of sight and base-defense bookkeeping stay untouched.
+					// Side effects like smoke/fire from incendiary rounds are also skipped on
+					// purpose in this step — we want a clean "ghost pass-through" first, before
+					// we layer outcome #2 (destruction) and outcome #3 (stuck) on top.
 				}
 
-				_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
+				// ----- spend pierce capacity AFTER applying effects -----
+				bgame->piercePower -= piercePowerDecrement;
 
-				// pWWWa/test: three-outcome resolution for terrain obstacles (units keep old handling)
-				if (_projectileImpact != V_UNIT)
-				{
-					int piercePowerLeft = _parent->getSave()->getBattleGame()->piercePower; // already decremented above
-
-					int outcome = !willPenetrate ? 3 : (obstacleBroken ? 2 : 1);
-
-					// pWWWa/test: pierce diagnostics. Search the log for "PIERCE".
-					Log(LOG_INFO) << "[PIERCE] tilePart=" << (int)_projectileImpact
-						<< " ToTile=" << _ammo->getRules()->getDamageType()->ToTile
-						<< " power=" << power
-						<< " appliedPower=" << appliedPower
-						<< " tileArmor=" << tileArmor
-						<< " decrement=" << piercePowerDercement
-						<< " piercePowerLeft=" << piercePowerLeft
-						<< " => OUTCOME " << outcome
-						<< (outcome == 1 ? " (PASS-THROUGH, obstacle SURVIVES)"
-						  : outcome == 2 ? " (PASS-THROUGH + DESTROYED)"
-						  :                " (STUCK, obstacle survives)");
-
-					if (outcome == 3)
-					{
-						// OUTCOME 3: bullet is stuck on the obstacle, damage already dealt, it will not fly further
-						// (Projectile::move() returns false on piercePower <= 0, so nothing else to do here)
-					}
-					else if (outcome == 2)
-					{
-						// OUTCOME 2: bullet passes through AND destroys the obstacle, then flies on weakened
-						// (destruction performed deterministically above via Tile::damage())
-					}
-					else
-					{
-						// OUTCOME 1: bullet passes through, loses energy, obstacle survives
-					}
-				}
+				// ----- diagnostics (grep the log for "PIERCE") -----
+				Log(LOG_INFO) << "[PIERCE] tilePart=" << (int)_projectileImpact
+					<< " ToTile="          << _ammo->getRules()->getDamageType()->ToTile
+					<< " power="           << power
+					<< " appliedPower="    << appliedPower
+					<< " decrement="       << piercePowerDecrement
+					<< " piercePowerLeft=" << bgame->piercePower
+					<< (_projectileImpact == V_UNIT
+						? " => UNIT HIT (randomized)"
+						: (bgame->piercePower > 0
+							? " => TERRAIN OUTCOME 1 (PASS-THROUGH, obstacle SURVIVES)"
+							: " => TERRAIN OUTCOME 3 (STOPPED, obstacle SURVIVES — step 1 stub)"));
 
 				if (_projectileImpact == V_UNIT)
 				{ // let arrange further handling of impacted units
-					if (!_parent->areAllEnemiesNeutralized()) projectileHitUnit(_parent->getMap()->getProjectile()->getPosition());
+					if (!_parent->areAllEnemiesNeutralized()) projectileHitUnit(pos);
 					_parent->checkForCasualties(nullptr, attack);
 					_parent->getSave()->reviveUnconsciousUnits(true);
 					_parent->convertInfected();
-					_parent->setStateInterval(BattlescapeState::DEFAULT_ANIM_SPEED / 5); // Alt solution: _parent->setStateInterval(50/3)
+					_parent->setStateInterval(BattlescapeState::DEFAULT_ANIM_SPEED / 5);
 				}
 				else
-				{ // let arrange further handling of impacted HE terrain objects
-					if(tile->getSavedGame()->getTileEngine()->checkForTerrainExplosions())
-					_parent->statePushNext(new ExplosionBState(_parent, _parent->getMap()->getProjectile()->getLastPositions(), BattleActionAttack{BA_NONE,attack.attacker,},tile, false, 0, 0));
+				{ // step 1: terrain obstacles are not damaged, so there is nothing to chain-explode here.
+				  // Leave this disabled for now; revisit when outcome #2 is added.
+				  // if (tile->getSavedGame()->getTileEngine()->checkForTerrainExplosions())
+				  //     _parent->statePushNext(new ExplosionBState(_parent, proj->getLastPositions(),
+				  //         BattleActionAttack{BA_NONE, attack.attacker}, tile, false, 0, 0));
 				}
 			}
-			else 
+			else
 			{ // do not spawn hit animation at the end of map
 				_projectileImpact = _action.type == BA_LAUNCH && _action.waypoints.size() > 1 ? V_EMPTY : V_OUTOFBOUNDS;
 			}
