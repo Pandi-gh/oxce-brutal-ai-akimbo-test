@@ -1076,10 +1076,13 @@ bool Projectile::move()
 	// Allows the bullet to fly through:
 	//   - empty voxels (V_EMPTY) — vanilla behaviour;
 	//   - dead/unconscious units (the old rule);
+	//   - living units while there is still pierce capacity left (NEW). Without this the
+	//     bullet would get stuck inside a still-alive target after a partial hit and
+	//     freeze the game (think() keeps re-entering with sameAsPrev=true forever);
 	//   - INTACT terrain (V_FLOOR / V_WESTWALL / V_NORTHWALL / V_OBJECT) while there is
-	//     still some pierce capacity left. This is the new bit: terrain is no longer
-	//     destroyed by the pierce path, so we need an explicit pass-through rule, otherwise
-	//     the projectile gets stuck on the first wall voxel.
+	//     still pierce capacity left. Terrain is no longer destroyed by the pierce path,
+	//     so we need an explicit pass-through rule, otherwise the projectile gets stuck on
+	//     the first wall voxel.
 	// When piercePower drops to <=0 we also return true here so the loop body below can
 	// run once more and trigger the proper "stop" via the V_OUTOFBOUNDS / piercePower check.
 	auto pierceCanAdvance = [this]() -> bool
@@ -1089,10 +1092,8 @@ bool Projectile::move()
 		if (vc == V_EMPTY) return true;
 		if (vc == V_UNIT)
 		{
-			BattleUnit* bu = _save->getTile(getPosition().toTile())->getOverlappingUnit(_save);
-			if (bu && (bu->getHealth() <= 0 || bu->getHealth() <= bu->getStunlevel()))
-				return true;
-			return false; // a living unit blocks us (handled in think())
+			// pass-through living/dead units alike while we still have pierce capacity
+			return true;
 		}
 		// terrain (V_FLOOR / V_WESTWALL / V_NORTHWALL / V_OBJECT): pass-through
 		return (vc >= V_FLOOR && vc <= V_OBJECT);
