@@ -1070,24 +1070,44 @@ bool Projectile::move()
 		}
 	}
 
-	bool isRail = _ammo && _ammo->getRules()->getPierceType() && !_ammo->getRules()->getShotgunPellets();
+	const bool isPierce = _ammo && _ammo->getRules()->getPierceType() && !_ammo->getRules()->getShotgunPellets();
 
-	for (int i = 0; (i < _speed && (!isRail || ( isRail && ( _save->getTileEngine()->voxelCheck(getPosition(), _action.actor) == V_EMPTY
-		|| _save->getBattleGame()->piercePower <= 0
-			|| _save->getTileEngine()->voxelCheck(getPosition(), _action.actor) == V_UNIT && _save->getTile(getPosition().toTile())->getOverlappingUnit(_save)
-		&& (_save->getTile(getPosition().toTile())->getOverlappingUnit(_save)->getHealth() <= 0
-			|| _save->getTile(getPosition().toTile())->getOverlappingUnit(_save)->getHealth() <= _save->getTile(getPosition().toTile())->getOverlappingUnit(_save)->getStunlevel())
-			 ))));
-		++i)
+	// pWWWa/test: helper for the pierce-mode "can advance through this voxel?" check.
+	// Allows the bullet to fly through:
+	//   - empty voxels (V_EMPTY) — vanilla behaviour;
+	//   - dead/unconscious units (the old rule);
+	//   - INTACT terrain (V_FLOOR / V_WESTWALL / V_NORTHWALL / V_OBJECT) while there is
+	//     still some pierce capacity left. This is the new bit: terrain is no longer
+	//     destroyed by the pierce path, so we need an explicit pass-through rule, otherwise
+	//     the projectile gets stuck on the first wall voxel.
+	// When piercePower drops to <=0 we also return true here so the loop body below can
+	// run once more and trigger the proper "stop" via the V_OUTOFBOUNDS / piercePower check.
+	auto pierceCanAdvance = [this]() -> bool
+	{
+		if (_save->getBattleGame()->piercePower <= 0) return true; // let the body stop us
+		const int vc = _save->getTileEngine()->voxelCheck(getPosition(), _action.actor);
+		if (vc == V_EMPTY) return true;
+		if (vc == V_UNIT)
+		{
+			BattleUnit* bu = _save->getTile(getPosition().toTile())->getOverlappingUnit(_save);
+			if (bu && (bu->getHealth() <= 0 || bu->getHealth() <= bu->getStunlevel()))
+				return true;
+			return false; // a living unit blocks us (handled in think())
+		}
+		// terrain (V_FLOOR / V_WESTWALL / V_NORTHWALL / V_OBJECT): pass-through
+		return (vc >= V_FLOOR && vc <= V_OBJECT);
+	};
+
+	for (int i = 0; i < _speed && (!isPierce || pierceCanAdvance()); ++i)
 	{
 		_position++;
-		if (_position == _trajectory.size() || _save->getTileEngine()->voxelCheck(getPosition(), _action.actor) == V_OUTOFBOUNDS)
+		if (_position == _trajectory.size() || isPierce && (_save->getTileEngine()->voxelCheck(getPosition(), _action.actor) == V_OUTOFBOUNDS || _save->getBattleGame()->piercePower <= 0))
 		{
 			_position--;
 			return false;
 		}
 
-		if ((_ammo && _ammo->getRules()->getMaxRangeEvent() && _ammo->getRules()->isOutOfRange(_action.actor->distance3dToPositionSq(getPosition().toTile()))) || isRail && _save->getBattleGame()->piercePower <= 0)
+		if (_ammo && _ammo->getRules()->getMaxRangeEvent() && _ammo->getRules()->isOutOfRange(_action.actor->distance3dToPositionSq(getPosition().toTile())))
 		{ // pWWWa: stop projectile fly, if it passed defined limited range and has "special" projectile type
 			return false;
 		}
