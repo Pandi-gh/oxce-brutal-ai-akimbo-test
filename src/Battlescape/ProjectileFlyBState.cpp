@@ -806,11 +806,11 @@ void ProjectileFlyBState::think()
 				}
 
 			int piercePowerDercement = 0;
-			int powerForHit = power; // По умолчанию для юнитов и лазеров
+			int powerForHit = power; // По умолчанию для юнитов
 
 			if (_projectileImpact == V_UNIT && tile->getOverlappingUnit(_parent->getSave()) && tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
 			{ 
-				// === ПОПАДАНИЕ В ЮНИТА (Оставляем ванилу) ===
+				// === ПОПАДАНИЕ В ЮНИТА (Оригинальная логика) ===
 				piercePowerDercement = tile->getOverlappingUnit(_parent->getSave())->getArmor()->getArmor(SIDE_FRONT) + tile->getOverlappingUnit(_parent->getSave())->getHealth();
 			}
 			else
@@ -818,95 +818,94 @@ void ProjectileFlyBState::think()
 				// === НАША НОВАЯ БАЛЛИСТИКА ДЛЯ ОКРУЖЕНИЯ ===
 				float armorEffectiveness = _ammo->getRules()->getDamageType()->ArmorEffectiveness;
 				
+				// Применяем только к кинетике
 				if (armorEffectiveness <= 2.99f) 
 				{
 					int wallArmor = tile->getMapData(tp)->getArmor();
 					int currentBulletPower = _parent->getSave()->getBattleGame()->piercePower; 
 					
 					float terrainMod = _ammo->getRules()->getDamageType()->ToTile;
-					if (terrainMod <= 0.0f) terrainMod = 1.0f; // Защита от деления на 0
+					if (terrainMod <= 0.0f) terrainMod = 1.0f;
 
 					if (wallArmor == 255) 
 					{
-						// Неразрушаемый край карты
 						piercePowerDercement = currentBulletPower; 
 						powerForHit = power; 
 					}
 					else if (wallArmor == 0) 
 					{
-						// Воздух/стекло без брони
 						piercePowerDercement = 0;
 						powerForHit = power;
 					}
 					else 
 					{
-						// 1. Считаем ПОТЕРЮ ЭНЕРГИИ ПУЛИ (Торможение)
-						float baseBrake = wallArmor * armorEffectiveness; 
+						// Базовое торможение
+						float baseBrake = (wallArmor * armorEffectiveness) * 1.5f; 
 						if (baseBrake <= 0.0f) baseBrake = 1.0f; 
 						
+						int destroyChance = 0;
+
 						if (currentBulletPower <= baseBrake) 
 						{
 							// === ВЕТКА А: ПУЛЯ ЗАСТРЯЛА В СТЕНЕ ===
 							piercePowerDercement = currentBulletPower; 
 							
-							// Шанс обрушения стены под шквальным огнем
-							int destroyChance = std::round(((float)currentBulletPower / baseBrake) * 100.0f);
-							if (wallArmor >= 50) destroyChance /= 10; // НЛО почти невозможно развалить пулеметом
-							
-							if (RNG::percent(destroyChance)) {
-								// ПРИКАЗ ДВИЖКУ: СЛОМАТЬ СТЕНУ!
-								powerForHit = std::round((wallArmor + 10) / terrainMod);
-							} else {
-								// ПРИКАЗ ДВИЖКУ: ОСТАВИТЬ СТЕНУ, НАРИСОВАТЬ ИСКРУ!
-								powerForHit = std::round((wallArmor - 1) / terrainMod);
-								if (powerForHit < 1) powerForHit = 1;
+							// Тяжелые стены (НЛО, толстый бетон) игнорируют обрушение от мелкого калибра
+							if (wallArmor < 50) 
+							{
+								destroyChance = std::round(((float)currentBulletPower / baseBrake) * 100.0f);
 							}
 						} 
 						else 
 						{
-							// === ВЕТКА Б: ПУЛЯ ПРОБИЛА СТЕНУ НАВЫЛЕТ ===
+							// === ВЕТКА Б: ПУЛЯ ПРОБИЛА ПРЕГРАДУ НАВЫЛЕТ ===
 							float ratio = (float)currentBulletPower / baseBrake;
 							float finalBrake = baseBrake / std::sqrt(ratio);
 							piercePowerDercement = std::round(finalBrake); 
 							
-							// 2. Считаем УРОН СТЕНЕ (от шока пробития)
-							float rawWallDamage = piercePowerDercement * armorEffectiveness;
-							int expectedWallDamage = std::round(rawWallDamage * terrainMod);
-
-							if (wallArmor >= 50) expectedWallDamage /= 4; // Стены НЛО поглощают шок кинетики
-
-							// 3. Решаем судьбу стены
-							if (expectedWallDamage >= wallArmor) 
+							if (armorEffectiveness < 1.0f) 
 							{
-								// Энергия пробития огромна - стена разлетается
-								powerForHit = std::round((wallArmor + 10) / terrainMod);
-							}
-							else
+								// Бронебойная пуля (AP < 1.0): делает аккуратную дырку.
+								// Шанс обрушения при пролете строго 0%.
+								destroyChance = 0;
+							} 
+							else 
 							{
-								// Шанс обрушения от структурной усталости
-								int collapseChance = (expectedWallDamage * 100) / wallArmor;
-								if (wallArmor >= 50) collapseChance /= 10; // НЛО не обрушается
-								
-								if (RNG::percent(collapseChance)) {
-									// ПРИКАЗ ДВИЖКУ: СЛОМАТЬ!
-									powerForHit = std::round((wallArmor + 10) / terrainMod);
-								} else {
-									// ПРИКАЗ ДВИЖКУ: ИДЕАЛЬНОЕ ПРОБИТИЕ! СТЕНА ЖИВЕТ!
-									powerForHit = std::round(rawWallDamage); 
-									// Защита от случайного разрушения ванильным движком:
-									if (std::round(powerForHit * terrainMod) >= wallArmor) {
-										powerForHit = std::round((wallArmor - 1) / terrainMod); 
+								// Обычная/тупая пуля: может разнести слабую стену
+								if (wallArmor < 40) // Только дерево, гипсокартон и т.д.
+								{
+									float rawWallDamage = (float)currentBulletPower * (armorEffectiveness * armorEffectiveness) * terrainMod;
+									
+									if (rawWallDamage >= wallArmor) 
+									{
+										destroyChance = 100;
 									}
-									if (powerForHit < 1) powerForHit = 1; // Минимум для рендера искры
+									else 
+									{
+										destroyChance = (rawWallDamage * 100) / wallArmor;
+										// Жесткий лимит: при пролете шанс не может быть больше 50%
+										destroyChance = std::min(destroyChance, 50); 
+									}
 								}
 							}
 						}
+
+						// Применяем шанс разрушения
+						if (destroyChance > 0 && RNG::percent(destroyChance)) 
+						{
+							tile->destroy(tp, _parent->getSave()->getObjectiveType());
+						}
+
+						// === ВИЗУАЛ (ИСКРЫ) ===
+						// Передаем 1. Движок умножит это на ToTile (например 0.5) и получит 0 урона.
+						// Но так как 1 > 0, движок ЧЕСТНО отрисует искру без микролагов и двойных эффектов!
+						powerForHit = 1; 
 					}
 				}
+				// Для плазмы/лазеров (AP > 2.99) powerForHit остается = power (ванильная логика)
 			}
 
-			// Вызов стандартной функции движка. Теперь он сделает всё гладко и без лагов,
-			// основываясь на нашем хитроумном значении powerForHit!
+			// Вызов стандартной функции
 			_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
 				_ammo->getRules()->getPierceType() == 2
 				? powerForHit
@@ -915,7 +914,7 @@ void ProjectileFlyBState::think()
 				? _ammo->getRules()->getDamageType()
 				: _parent->getMod()->getDamageType(dmgAOE));
 
-			// Списываем у пули честно рассчитанную энергию
+			// Отнимаем энергию у пули
 			_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
 
 				if (_projectileImpact == V_UNIT)
