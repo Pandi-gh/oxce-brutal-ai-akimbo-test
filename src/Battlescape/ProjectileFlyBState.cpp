@@ -520,23 +520,41 @@ bool ProjectileFlyBState::createNewProjectile()
 		}
 	}
 
-	// pierce power (capacity) variable definition;
+	// pWWWa/test: pierce bullet — initial damage of THIS particular projectile.
+	// Conceptually piercePower is no longer a separate "pierce capacity" of the bullet;
+	// it is the CURRENT damage carried by the bullet. The base damage is rolled by
+	// RuleDamageType::getRandomDamage() ONCE here, at the muzzle, exactly as described:
+	//     "пуля вылетает из ствола имея базовый урон + бонус за статы, затем умножается
+	//      на модификатор полученный от броска кубика заданного для конкретной обоймы".
+	// As the bullet flies through obstacles, this value is reduced by finalDecr each
+	// terrain hit (Excel-formula); when it drops to <=0, Projectile::move() stops it.
 	if (_ammo && _ammo->getRules()->getPierceType() && !(_action.type == BA_LAUNCH && _action.actor->getPosition() != _origin ))
 	{
-		if (!_ammo->getRules()->getPiercePowerCap())
+		int basePower = 0;
+		if (_ammo->getRules()->getPiercePowerCap())
 		{
-			_parent->getSave()->getBattleGame()->piercePower = _action.weapon && _action.weapon->getRules()->getIgnoreAmmoPower()
-		   ? _action.weapon->getRules()->getPowerBonus(BattleActionAttack::GetAferShoot(_action, _ammo)) - _action.weapon->getRules()->getPowerRangeReduction(_range)
-		   : _ammo->getRules()->getPowerBonus(BattleActionAttack::GetAferShoot(_action, _ammo)) - _action.weapon->getRules()->getPowerRangeReduction(_range);
+			basePower = _ammo->getRules()->getPiercePowerCap();
 		}
 		else
 		{
-			_parent->getSave()->getBattleGame()->piercePower = _ammo->getRules()->getPiercePowerCap();
+			basePower = _action.weapon && _action.weapon->getRules()->getIgnoreAmmoPower()
+				? _action.weapon->getRules()->getPowerBonus(BattleActionAttack::GetAferShoot(_action, _ammo)) - _action.weapon->getRules()->getPowerRangeReduction(_range)
+				: _ammo->getRules()->getPowerBonus(BattleActionAttack::GetAferShoot(_action, _ammo)) - _action.weapon->getRules()->getPowerRangeReduction(_range);
 		}
+		if (basePower < 0) basePower = 0;
+
+		// Single random roll for this shot — same RNG that vanilla uses on every other hit.
+		const int rolled = _ammo->getRules()->getDamageType()->getRandomDamage(basePower);
+		_parent->getSave()->getBattleGame()->piercePower = rolled;
+
 		// pWWWa/test: reset "last obstacle" markers for the new shot so the very first
 		// terrain voxel the bullet enters is treated as a brand-new obstacle.
 		_parent->getSave()->getBattleGame()->piercePrevTile = Position(-1, -1, -1);
 		_parent->getSave()->getBattleGame()->piercePrevPart = -1;
+
+		Log(LOG_INFO) << "[PIERCE] SHOT basePower=" << basePower
+			<< " rolledDamage=" << rolled
+			<< " (RNG of ammo's damageType)";
 	}
 
 	// Special handling for "spray" auto attack, get target positions from the action's waypoints, starting from the back
@@ -829,71 +847,84 @@ void ProjectileFlyBState::think()
 				}
 				else
 				{
-					// ----- raw projectile power at this distance -----
-					int power = 0;
-					if (_action.weapon->getRules()->getIgnoreAmmoPower())
-					{
-						power = _action.weapon->getRules()->getPowerBonus(attack)
-							- _action.weapon->getRules()->getPowerRangeReduction(proj->getDistance());
-					}
-					else
-					{
-						power = _ammo->getRules()->getPowerBonus(attack)
-							- _ammo->getRules()->getPowerRangeReduction(proj->getDistance());
-					}
+					// ===== Excel-formula pierce model =====================================
+					// piercePower for a pierce bullet IS the current damage of the bullet
+					// (rolled once at the muzzle in createNewProjectile()).
+					//
+					//   currentDamage = bgame->piercePower
+					//   AE            = ammo.damageType.ArmorEffectiveness
+					//   ToTile        = ammo.damageType.ToTile
+					//   armor         = tile.getMapData(part).getArmor()
+					//
+					// For terrain (V_FLOOR / V_WALL / V_OBJECT):
+					//   baseDecr      = armor * AE                 (Excel "Базовое торможение")
+					//   finalDecr     = sqrt(baseDecr^3 / damage)  (Excel "Итоговое торможение")
+					//   damageToWall  = damage * AE^2 * ToTile     (Excel "Урон забору" * ToTile)
+					// New damage carried forward     = damage - finalDecr.
+					// Wear accumulates per (tile, part); destroyed when wear >= armor * MUL.
+					//
+					// For V_UNIT we keep the original "(armor*AE + health) / resist" decrement
+					// so a bullet eventually runs out of damage on tough enemies, but the
+					// actual hit goes through TileEngine::hitUnit() with the current damage
+					// directly (no second random roll inside the hit). =========================
 
-					// ----- pierce capacity cost for THIS obstacle -----
-					int piercePowerDecrement = 0;
-					int tileArmor            = 0; // for terrain wear bookkeeping below
+					const auto* dtype  = _ammo->getRules()->getDamageType();
+					const float AE     = dtype->ArmorEffectiveness;
+					const float ToTile = dtype->ToTile;
+					const int   damage = bgame->piercePower; // current damage carried by bullet
+
+					int  piercePowerDecrement = 0;
+					int  tileArmor            = 0;
+					int  damageToWall         = 0;
+					int  appliedToUnit        = 0;
+
 					if (_projectileImpact == V_UNIT
 						&& tile->getOverlappingUnit(_parent->getSave())
 						&& tile->getOverlappingUnit(_parent->getSave())->getHealth() > 0)
-					{ // ternary used for avoiding possible zero division (e.g. damage modifier == 0)
-						BattleUnit* tgt   = tile->getOverlappingUnit(_parent->getSave());
-						const auto* dtype = _ammo->getRules()->getDamageType();
+					{
+						// UNIT: unchanged decrement (front armor + remaining health).
+						BattleUnit* tgt    = tile->getOverlappingUnit(_parent->getSave());
 						const float resist = tgt->getArmor()->getDamageModifier(dtype->ResistType);
 						piercePowerDecrement =
-							(tgt->getArmor()->getArmor(SIDE_FRONT) * dtype->ArmorEffectiveness + tgt->getHealth())
-							/ (resist ? resist : 1);
+							(int)((tgt->getArmor()->getArmor(SIDE_FRONT) * AE + tgt->getHealth())
+							/ (resist > 0.0f ? resist : 1.0f));
+						appliedToUnit = damage; // we'll hit unit with whatever the bullet has now
 					}
 					else
 					{
-						tileArmor             = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
-						const float toTile    = _ammo->getRules()->getDamageType()->ToTile;
-						piercePowerDecrement  = tileArmor / (toTile ? toTile : 1);
+						tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
+						if (AE > 0.0f && tileArmor > 0 && damage > 0)
+						{
+							const double baseDecr  = (double)tileArmor * AE;
+							const double finalDecr = std::sqrt((baseDecr * baseDecr * baseDecr) / (double)damage);
+							piercePowerDecrement   = (int)std::round(finalDecr);
+							damageToWall           = (int)std::round((double)damage * AE * AE * ToTile);
+						}
+						// AE == 0 -> "нейтринная" пуля: 0 decrement, 0 wear, летит сквозь.
 					}
 
-					// ----- effective power applied to the obstacle -----
-					const int appliedPower = (_ammo->getRules()->getPierceType() == 2)
-						? power
-						: std::min(bgame->piercePower, power);
-
 					// ----- terrain wear / destruction (OUTCOME 2) -----
-					// We accumulate appliedPower per (tile, part). When the accumulated wear
-					// reaches tileArmor * PIERCE_DESTROY_MULTIPLIER we destroy the part.
-					// Units are handled by the original randomized TileEngine::hit() below
-					// and do NOT participate in wear accumulation.
-					bool destroyedNow = false;
-					int  wearBefore   = 0;
-					int  wearAfter    = 0;
+					bool destroyedNow  = false;
+					int  wearBefore    = 0;
+					int  wearAfter     = 0;
 					int  wearThreshold = 0;
-					if (_projectileImpact != V_UNIT && tileArmor > 0)
+					if (_projectileImpact != V_UNIT && tileArmor > 0 && damageToWall > 0)
 					{
 						const int tileKey = (obstacleTile.z * 256 + obstacleTile.y) * 256 + obstacleTile.x;
 						const std::pair<int, int> key(tileKey, obstaclePart);
 
-						auto it = bgame->pierceWear.find(key);
-						wearBefore   = (it != bgame->pierceWear.end()) ? it->second : 0;
-						wearAfter    = wearBefore + appliedPower;
+						auto it       = bgame->pierceWear.find(key);
+						wearBefore    = (it != bgame->pierceWear.end()) ? it->second : 0;
+						wearAfter     = wearBefore + damageToWall;
 						wearThreshold = tileArmor * BattlescapeGame::PIERCE_DESTROY_MULTIPLIER;
 
 						if (wearAfter >= wearThreshold)
 						{
 							destroyedNow = true;
-							bgame->pierceWear.erase(key); // tile is gone, wipe its counter
+							bgame->pierceWear.erase(key);
 
-							// ----- replicate the side effects of TileEngine::hit() for terrain -----
-							// 1) base-defense module bookkeeping (mirrors hit())
+							// Replicate the side effects of TileEngine::hit() for terrain:
+							// 1) base-defense module bookkeeping
 							if (tp == O_OBJECT
 								&& _parent->getSave()->getMissionType() == "STR_BASE_DEFENSE"
 								&& tile->getMapData(O_OBJECT)
@@ -902,14 +933,12 @@ void ProjectileFlyBState::think()
 								auto& mm = _parent->getSave()->getModuleMap();
 								mm[(pos.x / 16) / 10][(pos.y / 16) / 10].second--;
 							}
-
-							// 2) damage with value >= armor -> Tile::damage() will destroy the part
+							// 2) Tile::damage(part, value, obj) with value >= armor -> destroyed
 							if (tile->damage(tp, tileArmor, _parent->getSave()->getObjectiveType()))
 							{
 								_parent->getSave()->addDestroyedObjective();
 							}
-
-							// 3) refresh visibility / lighting / gravity after a real terrain change
+							// 3) refresh visibility / lighting / gravity
 							_parent->getTileEngine()->applyGravity(tile);
 							LightLayers layer = (tp == O_FLOOR
 								&& _parent->getSave()->getTile(obstacleTile - Position(0, 0, 1)))
@@ -925,19 +954,23 @@ void ProjectileFlyBState::think()
 
 					if (_projectileImpact == V_UNIT)
 					{
-						// Units: original randomized handling.
-						_parent->getSave()->getTileEngine()->hit(
-							attack, pos, appliedPower,
-							_ammo->getRules()->getDamageType()->isDirect()
-								? _ammo->getRules()->getDamageType()
+						// Hit the unit directly with the bullet's CURRENT damage.
+						// No double random: getRandomDamage was already rolled at the muzzle.
+						BattleUnit* tgt = tile->getOverlappingUnit(_parent->getSave());
+						const int sz    = tgt ? tgt->getArmor()->getSize() * 8 : 8;
+						const Position relative = pos - (tgt
+							? tgt->getPosition().toVoxel() + Position(sz, sz,
+								tgt->getFloatHeight() - tile->getTerrainLevel())
+							: pos);
+						_parent->getSave()->getTileEngine()->hitUnit(
+							attack, tgt, relative, appliedToUnit,
+							dtype->isDirect()
+								? dtype
 								: _parent->getMod()->getDamageType(dmgAOE));
 					}
-					// Terrain: nothing more to do here — either we already destroyed the part
-					// above, or it survives (OUTCOME 1). No randomized TileEngine::hit() call,
-					// so smoke/fire from incendiary rounds is still skipped at pass-through.
-					// Will revisit if/when we want incendiary pierce to set walls on fire.
+					// Terrain: handled above (either destroyed or just wear accumulated).
 
-					// ----- spend pierce capacity AFTER applying effects -----
+					// ----- spend bullet damage AFTER applying effects -----
 					bgame->piercePower -= piercePowerDecrement;
 
 					// ----- remember this obstacle so we don't charge it again next tick -----
@@ -948,7 +981,7 @@ void ProjectileFlyBState::think()
 					const char* outcomeTag;
 					if (_projectileImpact == V_UNIT)
 					{
-						outcomeTag = " => UNIT HIT (randomized)";
+						outcomeTag = " => UNIT HIT";
 					}
 					else if (destroyedNow)
 					{
@@ -960,21 +993,22 @@ void ProjectileFlyBState::think()
 					}
 					else
 					{
-						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED, obstacle SURVIVES — step 1 stub)";
+						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED on obstacle)";
 					}
 
 					Log(LOG_INFO) << "[PIERCE] NEW tile=(" << obstacleTile.x << ',' << obstacleTile.y << ',' << obstacleTile.z << ')'
-						<< " tilePart="        << obstaclePart
-						<< " ToTile="          << _ammo->getRules()->getDamageType()->ToTile
-						<< " power="           << power
-						<< " appliedPower="    << appliedPower
-						<< " decrement="       << piercePowerDecrement
-						<< " piercePowerLeft=" << bgame->piercePower
-						<< " wear="            << wearAfter << '/' << wearThreshold
+						<< " part="     << obstaclePart
+						<< " AE="       << AE
+						<< " ToTile="   << ToTile
+						<< " armor="    << tileArmor
+						<< " damageIn=" << damage
+						<< " finalDecr=" << piercePowerDecrement
+						<< " wear+="    << damageToWall << " (" << wearAfter << '/' << wearThreshold << ')'
+						<< " damageOut=" << bgame->piercePower
 						<< outcomeTag;
 
 					if (_projectileImpact == V_UNIT)
-					{ // let arrange further handling of impacted units
+					{
 						if (!_parent->areAllEnemiesNeutralized()) projectileHitUnit(pos);
 						_parent->checkForCasualties(nullptr, attack);
 						_parent->getSave()->reviveUnconsciousUnits(true);
