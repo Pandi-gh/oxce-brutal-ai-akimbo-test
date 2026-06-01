@@ -822,11 +822,36 @@ void ProjectileFlyBState::think()
 					? power
 					: std::min(_parent->getSave()->getBattleGame()->piercePower, power);
 
-				_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
-					appliedPower,
-					_ammo->getRules()->getDamageType()->isDirect()
-					? _ammo->getRules()->getDamageType()
-					: _parent->getMod()->getDamageType(dmgAOE));
+				// pWWWa/test: decide the outcome FIRST (deterministically), then act accordingly.
+				int piercePowerAfter = _parent->getSave()->getBattleGame()->piercePower - piercePowerDercement;
+				bool willPenetrate  = piercePowerAfter > 0;       // enough power left to fly on
+				bool obstacleBroken = appliedPower >= tileArmor;  // hit was strong enough to destroy it
+
+				if (_projectileImpact == V_UNIT)
+				{
+					// units: keep the original randomized hit() handling
+					_parent->getSave()->getTileEngine()->hit(attack, _parent->getMap()->getProjectile()->getPosition(),
+						appliedPower,
+						_ammo->getRules()->getDamageType()->isDirect()
+						? _ammo->getRules()->getDamageType()
+						: _parent->getMod()->getDamageType(dmgAOE));
+				}
+				else
+				{
+					// pWWWa/test: terrain obstacles are handled DETERMINISTICALLY here so that
+					// the logged OUTCOME always matches what happens on the map.
+					// We do NOT call the randomized TileEngine::hit() for terrain anymore, because
+					// its internal RNG (power * ToTile * random) decided tile destruction independently.
+					if (obstacleBroken)
+					{
+						// guarantee destruction: pass a value >= armor so Tile::damage() destroys the part
+						if (tile->damage(tp, tileArmor, _parent->getSave()->getObjectiveType()))
+						{
+							_parent->getSave()->addDestroyedObjective();
+						}
+					}
+					// outcome 1 / 3: leave the tile standing (no destruction applied)
+				}
 
 				_parent->getSave()->getBattleGame()->piercePower -= piercePowerDercement;
 
@@ -834,8 +859,6 @@ void ProjectileFlyBState::think()
 				if (_projectileImpact != V_UNIT)
 				{
 					int piercePowerLeft = _parent->getSave()->getBattleGame()->piercePower; // already decremented above
-					bool willPenetrate  = piercePowerLeft > 0;     // enough power left to fly on
-					bool obstacleBroken = appliedPower >= tileArmor; // hit was strong enough to destroy it
 
 					int outcome = !willPenetrate ? 3 : (obstacleBroken ? 2 : 1);
 
@@ -860,11 +883,11 @@ void ProjectileFlyBState::think()
 					else if (outcome == 2)
 					{
 						// OUTCOME 2: bullet passes through AND destroys the obstacle, then flies on weakened
-						// hit() above already removes the map part when power >= armor via ToTile damage.
+						// (destruction performed deterministically above via Tile::damage())
 					}
 					else
 					{
-						// OUTCOME 1: bullet passes through, loses energy, obstacle survives (current behaviour)
+						// OUTCOME 1: bullet passes through, loses energy, obstacle survives
 					}
 				}
 
