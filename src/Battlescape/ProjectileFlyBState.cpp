@@ -33,6 +33,7 @@
 #include "../Mod/Armor.h"
 #include "../Mod/RuleItem.h"
 #include "../Engine/Options.h"
+#include "../Engine/Logger.h"
 #include "AIModule.h"
 #include "Camera.h"
 #include "Explosion.h"
@@ -832,15 +833,31 @@ void ProjectileFlyBState::think()
 				// pWWWa/test: three-outcome resolution for terrain obstacles (units keep old handling)
 				if (_projectileImpact != V_UNIT)
 				{
-					bool willPenetrate  = _parent->getSave()->getBattleGame()->piercePower > 0; // enough power left to fly on
-					bool obstacleBroken = appliedPower >= tileArmor;                            // hit was strong enough to destroy it
+					int piercePowerLeft = _parent->getSave()->getBattleGame()->piercePower; // already decremented above
+					bool willPenetrate  = piercePowerLeft > 0;     // enough power left to fly on
+					bool obstacleBroken = appliedPower >= tileArmor; // hit was strong enough to destroy it
 
-					if (!willPenetrate)
+					int outcome = !willPenetrate ? 3 : (obstacleBroken ? 2 : 1);
+
+					// pWWWa/test: pierce diagnostics. Search the log for "PIERCE".
+					Log(LOG_INFO) << "[PIERCE] tilePart=" << (int)_projectileImpact
+						<< " ToTile=" << _ammo->getRules()->getDamageType()->ToTile
+						<< " power=" << power
+						<< " appliedPower=" << appliedPower
+						<< " tileArmor=" << tileArmor
+						<< " decrement=" << piercePowerDercement
+						<< " piercePowerLeft=" << piercePowerLeft
+						<< " => OUTCOME " << outcome
+						<< (outcome == 1 ? " (PASS-THROUGH, obstacle SURVIVES)"
+						  : outcome == 2 ? " (PASS-THROUGH + DESTROYED)"
+						  :                " (STUCK, obstacle survives)");
+
+					if (outcome == 3)
 					{
 						// OUTCOME 3: bullet is stuck on the obstacle, damage already dealt, it will not fly further
 						// (Projectile::move() returns false on piercePower <= 0, so nothing else to do here)
 					}
-					else if (obstacleBroken)
+					else if (outcome == 2)
 					{
 						// OUTCOME 2: bullet passes through AND destroys the obstacle, then flies on weakened
 						// hit() above already removes the map part when power >= armor via ToTile damage.
