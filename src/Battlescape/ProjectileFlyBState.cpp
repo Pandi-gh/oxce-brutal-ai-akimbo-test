@@ -551,6 +551,9 @@ bool ProjectileFlyBState::createNewProjectile()
 		// terrain voxel the bullet enters is treated as a brand-new obstacle.
 		_parent->getSave()->getBattleGame()->piercePrevTile = Position(-1, -1, -1);
 		_parent->getSave()->getBattleGame()->piercePrevPart = -1;
+		// pWWWa/test: reset backscan "last think pos" — first think() of this shot will
+		// only test getPosition(0) (no history to scan yet).
+		_parent->getSave()->getBattleGame()->piercePrevThinkPos = Position(-1, -1, -1);
 
 		Log(LOG_INFO) << "[PIERCE] SHOT basePower=" << basePower
 			<< " rolledDamage=" << rolled
@@ -823,21 +826,55 @@ void ProjectileFlyBState::think()
 			&& !_ammo->getRules()->getShotgunPellets()
 			&& _parent->getMap()->getProjectile())
 		{
-			Projectile*    proj  = _parent->getMap()->getProjectile();
-			const Position pos   = proj->getPosition();
-			_projectileImpact    = _parent->getTileEngine()->voxelCheck(pos, _unit);
+			Projectile* proj  = _parent->getMap()->getProjectile();
+			auto*       bgame = _parent->getSave()->getBattleGame();
+			const auto  dmgAOE = _ammo->getRules()->getPierceAOEDamageType();
 
-			Tile*          tile  = _parent->getSave()->getTile(pos.toTile());
-			const auto     tp    = static_cast<TilePart>(_projectileImpact);
-			const auto     dmgAOE = _ammo->getRules()->getPierceAOEDamageType();
-			auto*          bgame = _parent->getSave()->getBattleGame();
+			// pWWWa/test: backscan. Projectile::move() advances by _speed voxels per
+			// think() tick. A high-speed bullet (sniper rifles + custom bulletSpeed)
+			// can skip narrow single-voxel obstacles like westwalls / northwalls
+			// entirely between two think() calls — voxelCheck() at getPosition(0)
+			// then returns V_EMPTY for the empty voxel BEHIND the wall, and the
+			// obstacle is silently ignored. Confirmed in logs of 2026-06-02:
+			// projectile flew through (44,18) and (31,18) walls without producing
+			// any [PIERCE] NEW entries (just SHOT -> END V_OUTOFBOUNDS).
+			//
+			// Fix: scan ALL voxels the projectile crossed since the previous tick,
+			// from oldest to newest, and process each one through the same single-
+			// voxel handler. piercePrevTile/piercePrevPart dedup ensures the same
+			// wall is charged once even if backscan finds it in two adjacent voxels.
+			//
+			// We use getPosition(-N) helpers; the trajectory buffer caps at the
+			// real length so out-of-range indices clamp safely. kBackscanDepth=12
+			// covers any realistic _speed value.
+			static constexpr int kBackscanDepth = 12;
 
-			// pWWWa/test: floor (V_FLOOR) counts as a real obstacle too. Diagonal/vertical
-			// shots cross floors and roofs as legitimate pierce targets (think of firing
-			// down through a hole in the roof, or up through a second-storey floor).
-			// So the full V_FLOOR..V_UNIT range is in.
-			if (_projectileImpact >= V_FLOOR && _projectileImpact <= V_UNIT && bgame->piercePower > 0)
+			// Handler for ONE voxel position. Returns nothing; sets _projectileImpact
+			// to the voxel type that was processed (or last-seen empty).
+			auto handlePierceVoxel = [&](const Position& pos)
 			{
+				_projectileImpact = _parent->getTileEngine()->voxelCheck(pos, _unit);
+
+				Tile*      tile = _parent->getSave()->getTile(pos.toTile());
+				const auto tp   = static_cast<TilePart>(_projectileImpact);
+
+				// pWWWa/test: floor (V_FLOOR) counts as a real obstacle too. Diagonal/vertical
+				// shots cross floors and roofs as legitimate pierce targets (think of firing
+				// down through a hole in the roof, or up through a second-storey floor).
+				// So the full V_FLOOR..V_UNIT range is in.
+				if (!(_projectileImpact >= V_FLOOR && _projectileImpact <= V_UNIT))
+				{
+					return; // empty/out-of-bounds voxel, nothing to do
+				}
+				if (bgame->piercePower <= 0)
+				{
+					return; // bullet already spent — let Projectile::move() stop it
+				}
+				if (!tile)
+				{
+					return;
+				}
+
 				const Position obstacleTile = pos.toTile();
 				const int      obstaclePart = (int)_projectileImpact;
 				const bool     sameAsPrev   = (obstacleTile == bgame->piercePrevTile
@@ -845,10 +882,9 @@ void ProjectileFlyBState::think()
 
 				if (sameAsPrev)
 				{
-					// We already charged this exact obstacle on a previous tick. Just wait for
-					// Projectile::move() to push the bullet out of it. No power loss, no log spam.
+					// We already charged this exact obstacle. No power loss, no log spam.
+					return;
 				}
-				else
 				{
 					// ===== Excel-formula pierce model =====================================
 					// piercePower for a pierce bullet IS the current damage of the bullet
@@ -1029,10 +1065,43 @@ void ProjectileFlyBState::think()
 						}
 					}
 				}
+			}; // end of handlePierceVoxel lambda
+
+			// pWWWa/test: backscan over voxels crossed since last think() tick.
+			// Walk from oldest (-N) to newest (0). N = min(kBackscanDepth, distance
+			// from current voxel to previous-tick voxel). If we never ran think()
+			// before for this shot, N = kBackscanDepth (just be safe).
+			const Position currentVox = proj->getPosition(0);
+			int scanFrom = kBackscanDepth;
+			if (bgame->piercePrevThinkPos.x >= 0)
+			{
+				// Find at what negative offset getPosition() matches piercePrevThinkPos.
+				// We don't have direct access to the trajectory vector here, so we just
+				// cap the scan at kBackscanDepth — duplicates are filtered by
+				// piercePrevTile/piercePrevPart dedup inside handlePierceVoxel.
+				const int dx = std::abs(currentVox.x - bgame->piercePrevThinkPos.x);
+				const int dy = std::abs(currentVox.y - bgame->piercePrevThinkPos.y);
+				const int dz = std::abs(currentVox.z - bgame->piercePrevThinkPos.z);
+				const int travelled = std::max({dx, dy, dz}); // Chebyshev distance in voxels
+				scanFrom = std::min(kBackscanDepth, std::max(0, travelled));
 			}
-			else
-			{ // do not spawn hit animation at the end of map
-				_projectileImpact = _action.type == BA_LAUNCH && _action.waypoints.size() > 1 ? V_EMPTY : V_OUTOFBOUNDS;
+			for (int back = scanFrom; back >= 0; --back)
+			{
+				if (bgame->piercePower <= 0) break; // stop scanning if bullet is spent
+				const Position scanPos = proj->getPosition(-back);
+				handlePierceVoxel(scanPos);
+			}
+			// Remember where we ended this think() for the next backscan.
+			bgame->piercePrevThinkPos = currentVox;
+
+			// If after backscan the current voxel is empty/out-of-bounds and there is
+			// no living projectile state, set _projectileImpact accordingly so the
+			// "impact!" path below (when projectile->move() returns false) behaves
+			// like before — V_EMPTY for LAUNCH chain, V_OUTOFBOUNDS for normal end.
+			if (_projectileImpact < V_FLOOR || _projectileImpact > V_UNIT)
+			{
+				_projectileImpact = _action.type == BA_LAUNCH && _action.waypoints.size() > 1
+					? V_EMPTY : V_OUTOFBOUNDS;
 			}
 		}
 
