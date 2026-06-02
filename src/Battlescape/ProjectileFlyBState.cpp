@@ -554,6 +554,9 @@ bool ProjectileFlyBState::createNewProjectile()
 
 		Log(LOG_INFO) << "[PIERCE] SHOT basePower=" << basePower
 			<< " rolledDamage=" << rolled
+			<< " origin=("    << _action.actor->getPosition().x << ',' << _action.actor->getPosition().y << ',' << _action.actor->getPosition().z << ')'
+			<< " targetTile=("<< _action.target.x << ',' << _action.target.y << ',' << _action.target.z << ')'
+			<< " targetVoxel=("<< _targetVoxel.x << ',' << _targetVoxel.y << ',' << _targetVoxel.z << ')'
 			<< " (RNG of ammo's damageType)";
 	}
 
@@ -997,6 +1000,7 @@ void ProjectileFlyBState::think()
 					}
 
 					Log(LOG_INFO) << "[PIERCE] NEW tile=(" << obstacleTile.x << ',' << obstacleTile.y << ',' << obstacleTile.z << ')'
+						<< " vox=("     << pos.x << ',' << pos.y << ',' << pos.z << ')'
 						<< " part="     << obstaclePart
 						<< " AE="       << AE
 						<< " ToTile="   << ToTile
@@ -1248,8 +1252,12 @@ void ProjectileFlyBState::think()
 					: (_projectileImpact == V_UNIT)      ? "V_UNIT"
 					: (_projectileImpact == V_OUTOFBOUNDS) ? "V_OUTOFBOUNDS"
 					: "?";
+				Projectile* finalProj = _parent->getMap()->getProjectile();
+				const Position finalVox = finalProj ? finalProj->getPosition() : Position(-1,-1,-1);
 				Log(LOG_INFO) << "[PIERCE] END  piercePowerLeft=" << _parent->getSave()->getBattleGame()->piercePower
-					<< " finalImpact=" << _projectileImpact << " (" << impactName << ')';
+					<< " finalImpact=" << _projectileImpact << " (" << impactName << ')'
+					<< " finalVox=("  << finalVox.x << ',' << finalVox.y << ',' << finalVox.z << ')'
+					<< " finalTile=(" << finalVox.toTile().x << ',' << finalVox.toTile().y << ',' << finalVox.toTile().z << ')';
 			}
 
 			delete _parent->getMap()->getProjectile();
