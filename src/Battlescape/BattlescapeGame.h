@@ -176,6 +176,12 @@ public:
 	/// Reset by ProjectileFlyBState::createNewProjectile() for every new shot.
 	Position piercePrevTile = Position(-1, -1, -1);
 	int      piercePrevPart = -1;
+	/// pWWWa/test: voxel position of the pierce bullet on the PREVIOUS think() tick.
+	/// Used to drive a backscan over every voxel the projectile crossed between two
+	/// think() calls (Projectile::move() advances by _speed voxels per tick, so a
+	/// fast bullet can skip narrow obstacles like single-voxel walls if we only test
+	/// the current voxel). Reset by createNewProjectile() to (-1,-1,-1).
+	Position piercePrevThinkPos = Position(-1, -1, -1);
 
 	/// pWWWa/test: accumulated "wear" damage from pierce pass-throughs (OUTCOME 1) per
 	/// (tile-encoded-id, tile-part) key. When the accumulated value reaches
