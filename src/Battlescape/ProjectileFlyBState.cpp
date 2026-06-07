@@ -932,12 +932,52 @@ void ProjectileFlyBState::think()
 					else
 					{
 						tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
+						// ===== Excel-formula v2 ============================================
+						// AE classification (informative, not used in math):
+						//   AE < 1.0  — armor-piercing rounds (steel/tungsten core)
+						//   AE = 1.0  — standard FMJ (copper jacket)
+						//   AE > 1.0  — expanding / soft-lead rounds
+						//
+						// Step 1. Threshold of penetration:
+						//   threshold = (HP^2 / 80) * AE
+						// If threshold > damage -> bullet shatters on the surface.
+						// damageToWall = 0, finalDecr = "all" (piercePower forced to 0 so
+						// Projectile::move() stops the projectile on this exact obstacle and
+						// the normal "impact!" path below handles the final freeze frame).
+						//
+						// Step 2. Wall damage when threshold passed:
+						//   damageToWall_raw = damage*AE − HP*0.1
+						//   damageToWall     = damageToWall_raw * ToTile   (ToTile is the
+						//   per-ammo "tile damage" multiplier and is applied on top, exactly
+						//   like elsewhere in the engine).
+						//
+						// Step 3. Bullet drag when threshold passed:
+						//   baseDecr  = AE * HP
+						//   finalDecr = baseDecr * (baseDecr / damage) ^ 0.4
+						// ====================================================================
 						if (AE > 0.0f && tileArmor > 0 && damage > 0)
 						{
-							const double baseDecr  = (double)tileArmor * AE;
-							const double finalDecr = std::sqrt((baseDecr * baseDecr * baseDecr) / (double)damage);
-							piercePowerDecrement   = (int)std::round(finalDecr);
-							damageToWall           = (int)std::round((double)damage * AE * AE * ToTile);
+							const double threshold = ((double)tileArmor * tileArmor / 80.0) * AE;
+							if (threshold > (double)damage)
+							{
+								// Pierce threshold NOT met — bullet shatters.
+								damageToWall         = 0;
+								piercePowerDecrement = damage; // force piercePower to 0
+								// tile takes no damage at all (no wear accumulation either —
+								// the wear block below is gated on damageToWall > 0).
+							}
+							else
+							{
+								// Pierce threshold met — apply Step 2 + Step 3.
+								const double rawWall  = (double)damage * AE - (double)tileArmor * 0.1;
+								damageToWall          = (int)std::round(rawWall * ToTile);
+								if (damageToWall < 0) damageToWall = 0; // edge case: AE>0 but rawWall<0
+
+								const double baseDecr = AE * (double)tileArmor;
+								const double ratio    = baseDecr / (double)damage;
+								const double finalDec = baseDecr * std::pow(ratio, 0.4);
+								piercePowerDecrement  = (int)std::round(finalDec);
+							}
 						}
 						// AE == 0 -> "нейтринная" пуля: 0 decrement, 0 wear, летит сквозь.
 					}
@@ -1030,21 +1070,32 @@ void ProjectileFlyBState::think()
 					{
 						outcomeTag = " => TERRAIN OUTCOME 1 (PASS-THROUGH, obstacle SURVIVES)";
 					}
+					else if (damageToWall == 0 && tileArmor > 0 && AE > 0.0f)
+					{
+						// Threshold not met — bullet shattered on the surface.
+						outcomeTag = " => TERRAIN OUTCOME 4 (SHATTERED, obstacle UNHARMED)";
+					}
 					else
 					{
 						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED on obstacle)";
 					}
 
+					// Threshold value for the diagnostic line.
+					const double thresholdLog = (tileArmor > 0)
+						? ((double)tileArmor * tileArmor / 80.0) * AE
+						: 0.0;
+
 					Log(LOG_INFO) << "[PIERCE] NEW tile=(" << obstacleTile.x << ',' << obstacleTile.y << ',' << obstacleTile.z << ')'
-						<< " vox=("     << pos.x << ',' << pos.y << ',' << pos.z << ')'
-						<< " part="     << obstaclePart
-						<< " AE="       << AE
-						<< " ToTile="   << ToTile
-						<< " armor="    << tileArmor
-						<< " damageIn=" << damage
-						<< " finalDecr=" << piercePowerDecrement
-						<< " wear+="    << damageToWall << " (" << wearAfter << '/' << wearThreshold << ')'
-						<< " damageOut=" << bgame->piercePower
+						<< " vox=("       << pos.x << ',' << pos.y << ',' << pos.z << ')'
+						<< " part="       << obstaclePart
+						<< " AE="         << AE
+						<< " ToTile="     << ToTile
+						<< " armor="      << tileArmor
+						<< " threshold="  << thresholdLog
+						<< " damageIn="   << damage
+						<< " finalDecr="  << piercePowerDecrement
+						<< " wear+="      << damageToWall << " (" << wearAfter << '/' << wearThreshold << ')'
+						<< " damageOut="  << bgame->piercePower
 						<< outcomeTag;
 
 					if (_projectileImpact == V_UNIT)
