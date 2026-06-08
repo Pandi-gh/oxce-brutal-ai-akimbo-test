@@ -477,7 +477,10 @@ void CraftArmorState::lstSoldiersClick(Action *action)
 					_lstSoldiers->setCellText(_lstSoldiers->getSelectedRow(), 1, tr("STR_NONE_UC"));
 					_lstSoldiers->setRowColor(_lstSoldiers->getSelectedRow(), _lstSoldiers->getColor());
 				}
-				else if (s->hasFullHealth())
+				// pWWWa/test: same expansion as in CraftSoldiersState — allow
+				// still-healing soldiers when Options::oxceWoundedAttackMissionIf
+				// allows it.
+				else if (s->hasFullHealth() || s->canJoinCraft())
 				{
 					int space = c->getSpaceAvailable();
 					CraftPlacementErrors err = c->validateAddingSoldier(space, s);
