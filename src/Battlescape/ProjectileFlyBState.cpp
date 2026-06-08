@@ -932,50 +932,72 @@ void ProjectileFlyBState::think()
 					else
 					{
 						tileArmor = tile->getMapData(tp) ? tile->getMapData(tp)->getArmor() : 0;
-						// ===== Excel-formula v2 ============================================
+						// ===== Excel-formula v3 (two-threshold model) =======================
 						// AE classification (informative, not used in math):
 						//   AE < 1.0  — armor-piercing rounds (steel/tungsten core)
 						//   AE = 1.0  — standard FMJ (copper jacket)
 						//   AE > 1.0  — expanding / soft-lead rounds
 						//
-						// Step 1. Threshold of penetration:
-						//   threshold = (HP^2 / 80) * AE
-						// If threshold > damage -> bullet shatters on the surface.
-						// damageToWall = 0, finalDecr = "all" (piercePower forced to 0 so
-						// Projectile::move() stops the projectile on this exact obstacle and
-						// the normal "impact!" path below handles the final freeze frame).
+						// Two thresholds:
+						//   T1 = (HP^2 / 80) * AE                      [scratch threshold]
+						//   T2 = MAX(T1 * 1.2 ; HP * AE)               [full-pierce threshold]
 						//
-						// Step 2. Wall damage when threshold passed:
-						//   damageToWall_raw = damage*AE − HP*0.1
-						//   damageToWall     = damageToWall_raw * ToTile   (ToTile is the
-						//   per-ammo "tile damage" multiplier and is applied on top, exactly
-						//   like elsewhere in the engine).
+						// Three behaviour zones, by current bullet damage D:
+						//   D <= T1                 -> SHATTER. Wall takes 0. Bullet stops here.
+						//   T1 < D < T2             -> SCRATCH. Linear interpolation between
+						//                              "nothing" at T1 and "full" at T2.
+						//                              fullWall = T2 * AE − HP * 0.1
+						//                              coef     = (D − T1) / (T2 − T1)
+						//                              rawWall  = fullWall * coef
+						//                              Bullet still suffers the full T2-based
+						//                              drag below, so a bullet just over T1
+						//                              will get stopped inside the wall on its
+						//                              own — no extra logic needed.
+						//   D >= T2                 -> FULL PIERCE.
+						//                              rawWall  = D * AE − HP * 0.1
 						//
-						// Step 3. Bullet drag when threshold passed:
-						//   baseDecr  = AE * HP
-						//   finalDecr = baseDecr * (baseDecr / damage) ^ 0.4
+						// damageToWall = round(rawWall * ToTile).
+						//
+						// Bullet drag (when threshold T1 passed):
+						//   finalDecr = T2 * (T2 / D) ^ 0.4
+						// T2 is used here on purpose for a seamless numeric transition between
+						// scratch and full-pierce zones (no jump in drag at D = T2). When D is
+						// only just above T1, (T2/D) is well above 1 and finalDecr ends up
+						// greater than D, so the bullet naturally gets stuck in the wall —
+						// matches the Excel "вмятинка, пуля внутри стены" picture.
 						// ====================================================================
 						if (AE > 0.0f && tileArmor > 0 && damage > 0)
 						{
-							const double threshold = ((double)tileArmor * tileArmor / 80.0) * AE;
-							if (threshold > (double)damage)
+							const double T1 = ((double)tileArmor * tileArmor / 80.0) * AE;
+							const double T2 = std::max(T1 * 1.2, (double)tileArmor * AE);
+
+							if ((double)damage <= T1)
 							{
-								// Pierce threshold NOT met — bullet shatters.
+								// Zone A: SHATTER. Bullet disintegrates on the surface.
 								damageToWall         = 0;
 								piercePowerDecrement = damage; // force piercePower to 0
-								// tile takes no damage at all (no wear accumulation either —
-								// the wear block below is gated on damageToWall > 0).
 							}
 							else
 							{
-								// Pierce threshold met — apply Step 2 + Step 3.
-								const double rawWall  = (double)damage * AE - (double)tileArmor * 0.1;
-								damageToWall          = (int)std::round(rawWall * ToTile);
-								if (damageToWall < 0) damageToWall = 0; // edge case: AE>0 but rawWall<0
+								double rawWall;
+								if ((double)damage < T2)
+								{
+									// Zone B: SCRATCH (T1 < D < T2). Linear interpolation.
+									const double fullWall = T2 * AE - (double)tileArmor * 0.1;
+									const double coef     = ((double)damage - T1) / (T2 - T1);
+									rawWall               = fullWall * coef;
+								}
+								else
+								{
+									// Zone C: FULL PIERCE (D >= T2).
+									rawWall = (double)damage * AE - (double)tileArmor * 0.1;
+								}
+								if (rawWall < 0.0) rawWall = 0.0;
+								damageToWall = (int)std::round(rawWall * ToTile);
 
-								const double baseDecr = AE * (double)tileArmor;
-								const double ratio    = baseDecr / (double)damage;
-								const double finalDec = baseDecr * std::pow(ratio, 0.4);
+								// Bullet drag — same formula for Zones B and C (T2-based).
+								const double ratio    = T2 / (double)damage;
+								const double finalDec = T2 * std::pow(ratio, 0.4);
 								piercePowerDecrement  = (int)std::round(finalDec);
 							}
 						}
@@ -1057,6 +1079,15 @@ void ProjectileFlyBState::think()
 					bgame->piercePrevPart = obstaclePart;
 
 					// ----- diagnostics (grep the log for "PIERCE") -----
+					// Recompute T1/T2 for diagnostics (cheap, deterministic — same numbers
+					// the formula block above used).
+					const double t1Log = (tileArmor > 0 && AE > 0.0f)
+						? ((double)tileArmor * tileArmor / 80.0) * AE
+						: 0.0;
+					const double t2Log = (tileArmor > 0 && AE > 0.0f)
+						? std::max(t1Log * 1.2, (double)tileArmor * AE)
+						: 0.0;
+
 					const char* outcomeTag;
 					if (_projectileImpact == V_UNIT)
 					{
@@ -1070,20 +1101,16 @@ void ProjectileFlyBState::think()
 					{
 						outcomeTag = " => TERRAIN OUTCOME 1 (PASS-THROUGH, obstacle SURVIVES)";
 					}
-					else if (damageToWall == 0 && tileArmor > 0 && AE > 0.0f)
+					else if (tileArmor > 0 && AE > 0.0f && (double)damage <= t1Log)
 					{
-						// Threshold not met — bullet shattered on the surface.
+						// Zone A: D <= T1, bullet shattered on the surface.
 						outcomeTag = " => TERRAIN OUTCOME 4 (SHATTERED, obstacle UNHARMED)";
 					}
 					else
 					{
+						// Either Zone B (scratch + stuck) or rare Zone C corner case.
 						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED on obstacle)";
 					}
-
-					// Threshold value for the diagnostic line.
-					const double thresholdLog = (tileArmor > 0)
-						? ((double)tileArmor * tileArmor / 80.0) * AE
-						: 0.0;
 
 					Log(LOG_INFO) << "[PIERCE] NEW tile=(" << obstacleTile.x << ',' << obstacleTile.y << ',' << obstacleTile.z << ')'
 						<< " vox=("       << pos.x << ',' << pos.y << ',' << pos.z << ')'
@@ -1091,7 +1118,8 @@ void ProjectileFlyBState::think()
 						<< " AE="         << AE
 						<< " ToTile="     << ToTile
 						<< " armor="      << tileArmor
-						<< " threshold="  << thresholdLog
+						<< " T1="         << t1Log
+						<< " T2="         << t2Log
 						<< " damageIn="   << damage
 						<< " finalDecr="  << piercePowerDecrement
 						<< " wear+="      << damageToWall << " (" << wearAfter << '/' << wearThreshold << ')'
