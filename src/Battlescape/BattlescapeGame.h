@@ -182,6 +182,14 @@ public:
 	/// fast bullet can skip narrow obstacles like single-voxel walls if we only test
 	/// the current voxel). Reset by createNewProjectile() to (-1,-1,-1).
 	Position piercePrevThinkPos = Position(-1, -1, -1);
+	/// pWWWa/test: when a pierce bullet SHATTERS on a wall (Zone A: D <= T1), we
+	/// remember the exact voxel on the obstacle's surface here, plus the tile-part
+	/// that was hit. The "impact!" path in ProjectileFlyBState::think() then spawns
+	/// ExplosionBState at this voxel so the player ALWAYS sees a hit animation +
+	/// hears the standard ricochet sound, no matter where Projectile::move() happened
+	/// to stop the bullet mechanically. (-1,-1,-1) / -1 means "no shatter this shot".
+	Position pierceShatterAt   = Position(-1, -1, -1);
+	int      pierceShatterPart = -1;
 
 	/// pWWWa/test: accumulated "wear" damage from pierce pass-throughs (OUTCOME 1) per
 	/// (tile-encoded-id, tile-part) key. When the accumulated value reaches
