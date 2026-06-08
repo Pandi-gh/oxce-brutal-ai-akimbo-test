@@ -1129,6 +1129,23 @@ bool Soldier::canDefendBase() const
 	return currentHealthPercentage >= Options::oxceWoundedDefendBaseIf;
 }
 
+/**
+ * pWWWa/test: is the soldier OK enough to be assigned to a craft for an
+ * outgoing mission?
+ * Same currentHP% formula as canDefendBase(), separate threshold option.
+ * When BattleUnit::updateArmorFromSoldier() spins up a BattleUnit from a
+ * wounded soldier, it already drops _health to (maxHealth - healthMissing -
+ * woundRecovery), starts morale at 75, and all the engine's stat-scaling
+ * code (TU/stamina/reactions/accuracy that look at the current %HP) just
+ * works. So we don't need to do anything beyond letting the assignment
+ * UI / BattlescapeGenerator accept these soldiers.
+ */
+bool Soldier::canJoinCraft() const
+{
+	int currentHealthPercentage = std::max(0, _currentStats.health - getWoundRecoveryInt() - getHealthMissing()) * 100 / _currentStats.health;
+	return currentHealthPercentage >= Options::oxceWoundedAttackMissionIf;
+}
+
 
 /**
  * Returns the amount of missing mana.
