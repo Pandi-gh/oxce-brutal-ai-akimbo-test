@@ -624,6 +624,17 @@ std::string Soldier::getCraftString(Language *lang, const BaseSumDailyRecovery& 
 		{
 			ss << days;
 		}
+		// pWWWa/test: when a wounded soldier is also assigned to a craft (only
+		// possible after enabling Options::oxceWoundedAttackMissionIf), append
+		// the craft name so the player sees both pieces of info — "still
+		// recovering" AND "scheduled to fly". Without this the craft column
+		// just shows "РАНЕНИЕ>N" and it's impossible to tell at a glance which
+		// craft a wounded soldier was queued onto.
+		if (_craft != 0)
+		{
+			ss << " → ";
+			ss << _craft->getName(lang);
+		}
 		s = ss.str();
 	}
 	else if (_craft == 0)
