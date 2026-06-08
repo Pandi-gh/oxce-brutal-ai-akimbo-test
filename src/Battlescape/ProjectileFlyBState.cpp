@@ -1409,8 +1409,30 @@ void ProjectileFlyBState::think()
 							_parent->getMap()->getExplosions()->push_back(
 								new Explosion(_bgame->pierceShatterAt,
 									hitAnim, 0, false, false, hitFrames));
+
+							// pWWWa/test: force-show the spark even if the obstacle tile
+							// is outside the player's FOV. Map::draw() reads
+							// tile->getVisible() before drawing each explosion sprite
+							// and silently skips invisible ones (see Map.cpp around
+							// line 343 where _explosionInFOV is computed). That meant
+							// "audible-only" hits on any wall BEHIND another wall —
+							// the impact tile is geometrically out of LOS and gets
+							// drawn invisibly. Bumping +1 here makes Map::draw() pick
+							// the sprite up. We do NOT decrement back: calculateFOV()
+							// runs after every unit move / action and recomputes the
+							// _visible counter from scratch, so this leak is bounded
+							// and harmless (Sint16 holds 30k+ accumulated bumps).
+							Tile* sparkTile = _parent->getSave()->getTile(
+								_bgame->pierceShatterAt.toTile());
+							const int visBefore = sparkTile ? sparkTile->getVisible() : -1;
+							if (sparkTile && visBefore == 0)
+							{
+								sparkTile->setVisible(+1);
+							}
+
 							Log(LOG_INFO) << "[PIERCE] pre-seeded hit Explosion (anim="
-								<< hitAnim << " frames=" << hitFrames << ')';
+								<< hitAnim << " frames=" << hitFrames
+								<< ") tileVisibleBefore=" << visBefore;
 						}
 					}
 
