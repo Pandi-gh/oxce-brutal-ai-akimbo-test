@@ -197,6 +197,11 @@ public:
 	bool hasFullHealth() const;
 	/// Is the soldier capable of defending a base?.
 	bool canDefendBase() const;
+	/// pWWWa/test: is the soldier OK enough to be assigned to a craft for an
+	/// outgoing mission while still recovering? Uses the same HP%-with-wounds
+	/// formula as canDefendBase() but checks Options::oxceWoundedAttackMissionIf
+	/// (separate threshold, default 100 = vanilla "full health only").
+	bool canJoinCraft() const;
 
 	/// Gets the amount of missing mana.
 	int getManaMissing() const;
