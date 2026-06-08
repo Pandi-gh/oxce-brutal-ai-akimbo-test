@@ -400,6 +400,8 @@ en-US:
 #==== Battlescape ===============
   STR_WOUNDED_DEFEND_BASE_IF: "Wounded defend (if HP above x%)"
   STR_WOUNDED_DEFEND_BASE_IF_DESC: "Wounded soldiers defend the base too, if their health is above the given percentage threshold."
+  STR_WOUNDED_ATTACK_MISSION_IF: "Wounded on missions (if HP above x%)"
+  STR_WOUNDED_ATTACK_MISSION_IF_DESC: "Allow assigning still-healing soldiers to a craft (and thus to outgoing missions) when their current HP percentage is above this threshold. Wounded soldiers deploy with reduced HP and morale; all stat scaling (TU, stamina, accuracy etc.) follows the engine's standard %HP rules. Set to 100 to disable (vanilla behaviour)."
   STR_PLAY_BRIEFING_MUSIC_DURING_EQUIPMENT: "Play Briefing music longer"
   STR_PLAY_BRIEFING_MUSIC_DURING_EQUIPMENT_DESC: "Briefing music will continue playing during equipment phase until the Battlescape is displayed."
   STR_NIGHT_VISION_COLOR: "Select Night Vision color"
