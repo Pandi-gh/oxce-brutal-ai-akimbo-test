@@ -17,6 +17,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <algorithm>
+#include <sstream>
 #include "ProjectileFlyBState.h"
 #include "ExplosionBState.h"
 #include "Projectile.h"
@@ -554,6 +555,9 @@ bool ProjectileFlyBState::createNewProjectile()
 		// pWWWa/test: reset backscan "last think pos" — first think() of this shot will
 		// only test getPosition(0) (no history to scan yet).
 		_parent->getSave()->getBattleGame()->piercePrevThinkPos = Position(-1, -1, -1);
+		// pWWWa/test: reset SHATTER marker for the new shot.
+		_parent->getSave()->getBattleGame()->pierceShatterAt   = Position(-1, -1, -1);
+		_parent->getSave()->getBattleGame()->pierceShatterPart = -1;
 
 		Log(LOG_INFO) << "[PIERCE] SHOT basePower=" << basePower
 			<< " rolledDamage=" << rolled
@@ -976,6 +980,15 @@ void ProjectileFlyBState::think()
 								// Zone A: SHATTER. Bullet disintegrates on the surface.
 								damageToWall         = 0;
 								piercePowerDecrement = damage; // force piercePower to 0
+
+								// pWWWa/test: remember the EXACT voxel on the obstacle's
+								// surface so the impact-ExplosionBState below spawns at the
+								// right spot regardless of where Projectile::move() finally
+								// halts the bullet. Also flush remaining trajectory so the
+								// projectile visually freezes here without overshoot.
+								bgame->pierceShatterAt   = pos;
+								bgame->pierceShatterPart = obstaclePart;
+								if (proj) proj->skipTrajectory();
 							}
 							else
 							{
@@ -1112,6 +1125,17 @@ void ProjectileFlyBState::think()
 						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED on obstacle)";
 					}
 
+					// pWWWa/test: in SHATTER (Zone A) wearAfter / wearThreshold are both
+					// zero by design — we never even compute them — so the bare "(0/0)" in
+					// the log used to look like a missing value. Print "(SHATTER)" instead
+					// to make it obvious that the bullet shattered on the surface.
+					const bool shatterLog = (tileArmor > 0 && AE > 0.0f && (double)damage <= t1Log);
+					std::ostringstream wearTag;
+					if (shatterLog)
+						wearTag << "SHATTER";
+					else
+						wearTag << wearAfter << '/' << wearThreshold;
+
 					Log(LOG_INFO) << "[PIERCE] NEW tile=(" << obstacleTile.x << ',' << obstacleTile.y << ',' << obstacleTile.z << ')'
 						<< " vox=("       << pos.x << ',' << pos.y << ',' << pos.z << ')'
 						<< " part="       << obstaclePart
@@ -1122,7 +1146,7 @@ void ProjectileFlyBState::think()
 						<< " T2="         << t2Log
 						<< " damageIn="   << damage
 						<< " finalDecr="  << piercePowerDecrement
-						<< " wear+="      << damageToWall << " (" << wearAfter << '/' << wearThreshold << ')'
+						<< " wear+="      << damageToWall << " (" << wearTag.str() << ')'
 						<< " damageOut="  << bgame->piercePower
 						<< outcomeTag;
 
@@ -1274,8 +1298,27 @@ void ProjectileFlyBState::think()
 						offset = -2;
 					}
 
+					// pWWWa/test: if this pierce bullet shattered (Zone A), the hit
+					// animation MUST appear on the obstacle's surface, not at wherever
+					// Projectile::move() happened to stop. Override the impact center
+					// with the SHATTER voxel we recorded earlier.
+					auto* _bgame = _parent->getSave()->getBattleGame();
+					LastPositions impactCenter = _parent->getMap()->getProjectile()->getLastPositions(offset);
+					if (_bgame->pierceShatterAt.x >= 0)
+					{
+						impactCenter = LastPositions(_bgame->pierceShatterAt, _bgame->pierceShatterAt);
+						// Also lock _projectileImpact to the actual obstacle part so the
+						// branch below doesn't accidentally fall into V_OUTOFBOUNDS code.
+						_projectileImpact = (VoxelType)_bgame->pierceShatterPart;
+						Log(LOG_INFO) << "[PIERCE] SHATTER impact override at vox=("
+							<< _bgame->pierceShatterAt.x << ','
+							<< _bgame->pierceShatterAt.y << ','
+							<< _bgame->pierceShatterAt.z << ") part="
+							<< _bgame->pierceShatterPart;
+					}
+
 					_parent->statePushFront(new ExplosionBState(
-						_parent, _parent->getMap()->getProjectile()->getLastPositions(offset),
+						_parent, impactCenter,
 						attack, 0,
 						noMoreShotsToShoot(),
 						shotgun ? 0 : _range + _parent->getMap()->getProjectile()->getDistance()
