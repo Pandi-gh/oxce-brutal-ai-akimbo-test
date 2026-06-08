@@ -540,7 +540,12 @@ void CraftSoldiersState::lstSoldiersClick(Action *action)
 		{
 			// nothing
 		}
-		else if (s->hasFullHealth())
+		// pWWWa/test: hasFullHealth() OR canJoinCraft() — let still-healing
+		// soldiers be assigned to a craft when Options::oxceWoundedAttackMissionIf
+		// allows it. canJoinCraft() returns true for healthy soldiers too, but
+		// keep hasFullHealth() in the OR for clarity and zero-overhead in the
+		// vanilla setting (threshold = 100).
+		else if (s->hasFullHealth() || s->canJoinCraft())
 		{
 			int space = c->getSpaceAvailable();
 			CraftPlacementErrors err = c->validateAddingSoldier(space, s);
