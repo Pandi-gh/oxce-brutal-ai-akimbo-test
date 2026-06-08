@@ -106,6 +106,7 @@ OPT bool oxcePersonalLayoutIncludingArmor;
 OPT bool oxceManualPromotions;
 
 OPT int oxceWoundedDefendBaseIf;
+OPT int oxceWoundedAttackMissionIf;
 OPT bool oxcePlayBriefingMusicDuringEquipment;
 OPT int oxceNightVisionColor;
 OPT int oxceAutoNightVisionThreshold;
