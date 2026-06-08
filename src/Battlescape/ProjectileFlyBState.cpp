@@ -38,6 +38,7 @@
 #include "AIModule.h"
 #include "Camera.h"
 #include "Explosion.h"
+#include "Particle.h"
 #include "BattlescapeState.h"
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../fmath.h"
