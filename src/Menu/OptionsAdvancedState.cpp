@@ -375,7 +375,7 @@ void OptionsAdvancedState::lstOptionsClick(Action *action)
 		{
 			increment *= 10;
 		}
-		else if (i == &Options::oxceResearchScrollSpeedWithCtrl || i == &Options::oxceManufactureScrollSpeedWithCtrl || i == &Options::oxceReactionFireThreshold)
+		else if (i == &Options::oxceResearchScrollSpeedWithCtrl || i == &Options::oxceManufactureScrollSpeedWithCtrl || i == &Options::oxceReactionFireThreshold || i == &Options::oxceWoundedAttackMissionIf)
 		{
 			increment *= 5;
 		}
@@ -467,6 +467,12 @@ void OptionsAdvancedState::lstOptionsClick(Action *action)
 		}
 		else if (i == &Options::oxceWoundedDefendBaseIf || i == &Options::oxceReactionFireThreshold) {
 			min = 0;
+			max = 100;
+		}
+		else if (i == &Options::oxceWoundedAttackMissionIf) {
+			// pWWWa/test: 70-100, step 5. 100 = vanilla (full health only),
+			// 70 = most permissive setting requested.
+			min = 70;
 			max = 100;
 		}
 		else if (i == &Options::oxceResearchScrollSpeedWithCtrl || i == &Options::oxceManufactureScrollSpeedWithCtrl)
