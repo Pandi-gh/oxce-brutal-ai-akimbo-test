@@ -1390,6 +1390,28 @@ void ProjectileFlyBState::think()
 							<< _bgame->pierceShatterAt.y << ','
 							<< _bgame->pierceShatterAt.z << ") part="
 							<< _bgame->pierceShatterPart;
+
+						// pWWWa/test: pre-seed the spark sprite ourselves. The upstream
+						// ExplosionBState::init() decides _power=0 for pierce bullets
+						// (it correctly assumes our pierce code has already dealt the
+						// damage) and on `miss==true` falls back to HitMissAnimation,
+						// which is undefined for many ammos — anim ends up at -1 and
+						// no sprite is spawned. To avoid that "audible but invisible"
+						// hit, we push the standard hit Explosion ourselves right here.
+						// ExplosionBState that we statePushFront() below will then see
+						// a non-empty getExplosions() list, skip its own explode(), and
+						// just animate ours via think() — same path that shotgun
+						// pellets use, which is known to work reliably.
+						const int hitAnim   = _ammo->getRules()->getHitAnimation();
+						const int hitFrames = _ammo->getRules()->getHitAnimationFrames();
+						if (hitAnim >= 0)
+						{
+							_parent->getMap()->getExplosions()->push_back(
+								new Explosion(_bgame->pierceShatterAt,
+									hitAnim, 0, false, false, hitFrames));
+							Log(LOG_INFO) << "[PIERCE] pre-seeded hit Explosion (anim="
+								<< hitAnim << " frames=" << hitFrames << ')';
+						}
 					}
 
 					_parent->statePushFront(new ExplosionBState(
