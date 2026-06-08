@@ -38,7 +38,6 @@
 #include "AIModule.h"
 #include "Camera.h"
 #include "Explosion.h"
-#include "Particle.h"
 #include "BattlescapeState.h"
 #include "../Savegame/BattleUnitStatistics.h"
 #include "../fmath.h"
@@ -1088,31 +1087,36 @@ void ProjectileFlyBState::think()
 					// ----- spend bullet damage AFTER applying effects -----
 					bgame->piercePower -= piercePowerDecrement;
 
-					// ----- pWWWa/test: "heavy pass-through" sparks ----------------------
+					// ----- pWWWa/test: "heavy pass-through" audible feedback ------------
 					// Visual feedback for an obstacle that drained more than half of the
 					// bullet's INCOMING energy on the way through it. Fires only on
 					// OUTCOME 1 / OUTCOME 2 (i.e. the bullet still has damage left), so
-					// the player sees a quick spark animation on the wall the bullet just
-					// barely punched through, in addition to whatever happens at the final
-					// impact point. OUTCOME 3 (STOPPED) and OUTCOME 4 (SHATTERED) already
-					// get their own hit animation via the impact path, so they are not
-					// duplicated here. Lightweight: pushed straight into Map::getExplosions
-					// (no new BattleState), the projectile keeps flying.
+					// the player gets an audible "ping" on the wall the bullet just barely
+					// punched through, in addition to whatever happens at the final impact
+					// point. OUTCOME 3 (STOPPED) and OUTCOME 4 (SHATTERED) already get
+					// their own hit animation + sound via the impact path.
+					//
+					// History of failed visuals: an earlier attempt pushed `new Explosion`
+					// straight into Map::getExplosions(). Explosions are advanced only by
+					// ExplosionBState::think() which doesn't exist mid-flight, so the
+					// sprite froze on the wall and finally played in a batch when the
+					// projectile's own final impact created an ExplosionBState — very
+					// laggy. A second attempt used vapor particles (`addVaporParticle`),
+					// but those depend on the mod's transparency LUT covering the colour
+					// range we picked, and in the test setup they also looked frozen.
+					// Sound-only is the only mechanism that is guaranteed to be in-sync
+					// with the projectile's actual flight position, so we stick with it.
 					if (_projectileImpact != V_UNIT
 						&& bgame->piercePower > 0
 						&& piercePowerDecrement * 2 > damage)
 					{
-						const int hitAnim   = _ammo->getRules()->getHitAnimation();
-						const int hitFrames = _ammo->getRules()->getHitAnimationFrames();
-						_parent->getMap()->getExplosions()->push_back(
-							new Explosion(pos, hitAnim, 0, false, false, hitFrames));
 						const int hitSnd = _ammo->getRules()->getHitSound();
 						if (hitSnd != Mod::NO_SOUND)
 						{
 							_parent->getMod()->getSoundByDepth(_parent->getDepth(), hitSnd)
 								->play(-1, _parent->getMap()->getSoundAngle(pos));
 						}
-						Log(LOG_INFO) << "[PIERCE] HEAVY-PASS sparks at vox=("
+						Log(LOG_INFO) << "[PIERCE] HEAVY-PASS sound at vox=("
 							<< pos.x << ',' << pos.y << ',' << pos.z
 							<< ") decr=" << piercePowerDecrement
 							<< " / damageIn=" << damage;
