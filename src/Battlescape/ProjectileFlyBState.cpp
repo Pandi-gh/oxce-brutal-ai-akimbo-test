@@ -1098,6 +1098,26 @@ void ProjectileFlyBState::think()
 					// ----- spend bullet damage AFTER applying effects -----
 					bgame->piercePower -= piercePowerDecrement;
 
+					// pWWWa/test: STOPPED-on-obstacle impact override.
+					// If this decrement just emptied piercePower on a terrain part, the
+					// projectile will be halted by Projectile::move() on its next tick,
+					// but only AFTER advancing by one more voxel (the move() loop checks
+					// the stop condition AFTER _position++, not before). That puts the
+					// bullet visually one voxel past the wall, and ExplosionBState then
+					// spawns the hit animation in empty air — no sparks.
+					// Same fix as SHATTER uses: remember the EXACT voxel where the bullet
+					// was actually stopped, so the impact path below can override the
+					// explosion center and put the sparks on the wall instead of past it.
+					// Skipped for V_UNIT (sparks-on-corpse handled elsewhere) and for the
+					// destroyed-now case (tile is gone, nothing to spark on).
+					if (_projectileImpact != V_UNIT
+						&& bgame->piercePower <= 0
+						&& !destroyedNow)
+					{
+						bgame->pierceShatterAt   = pos;
+						bgame->pierceShatterPart = obstaclePart;
+					}
+
 					// ----- pWWWa/test: "heavy pass-through" audible feedback ------------
 					// Visual feedback for an obstacle that drained more than half of the
 					// bullet's INCOMING energy on the way through it. Fires only on
@@ -1334,7 +1354,16 @@ void ProjectileFlyBState::think()
 					_action.weapon->spendAmmoForAction(_action.type, _parent->getSave());
 				}
 
-				if (_projectileImpact != V_OUTOFBOUNDS || (_ammo && _ammo->getRules()->getShotgunPellets()))
+				// pWWWa/test: pierce override forces us into the explosion path even if
+				// _projectileImpact got reclassified to V_OUTOFBOUNDS by the
+				// post-backscan fallback above (happens when the bullet halted on a
+				// wall but Projectile::move() advanced one extra voxel into open air
+				// before returning false).
+				const bool pierceShatterPending =
+					_parent->getSave()->getBattleGame()->pierceShatterAt.x >= 0;
+				if (_projectileImpact != V_OUTOFBOUNDS
+					|| (_ammo && _ammo->getRules()->getShotgunPellets())
+					|| pierceShatterPending)
 				{
 					bool shotgun = _ammo && _ammo->getRules()->getShotgunPellets() != 0 && _ammo->getRules()->getDamageType()->isDirect();
 					int offset = 0;
