@@ -483,6 +483,9 @@ void createAdvancedOptionsOXCE()
 
 	// OXCE options battlescape
 	_info.push_back(OptionInfo(OPTION_OXCE, "oxceWoundedDefendBaseIf", &oxceWoundedDefendBaseIf, 100, "STR_WOUNDED_DEFEND_BASE_IF", "STR_BATTLESCAPE"));
+	// pWWWa/test: allow assigning wounded soldiers to a craft when their HP%
+	// stays above this threshold. 100 = vanilla behaviour (full health only).
+	_info.push_back(OptionInfo(OPTION_OXCE, "oxceWoundedAttackMissionIf", &oxceWoundedAttackMissionIf, 100, "STR_WOUNDED_ATTACK_MISSION_IF", "STR_BATTLESCAPE"));
 	_info.push_back(OptionInfo(OPTION_OXCE, "oxcePlayBriefingMusicDuringEquipment", &oxcePlayBriefingMusicDuringEquipment, false, "STR_PLAY_BRIEFING_MUSIC_DURING_EQUIPMENT", "STR_BATTLESCAPE"));
 	_info.push_back(OptionInfo(OPTION_OXCE, "oxceNightVisionColor", &oxceNightVisionColor, 5, "STR_NIGHT_VISION_COLOR", "STR_BATTLESCAPE"));
 	_info.push_back(OptionInfo(OPTION_OXCE, "oxceAutoNightVisionThreshold", &oxceAutoNightVisionThreshold, 15, "STR_AUTO_NIGHT_VISION_THRESHOLD", "STR_BATTLESCAPE"));
