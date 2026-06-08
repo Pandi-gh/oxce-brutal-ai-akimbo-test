@@ -1118,85 +1118,41 @@ void ProjectileFlyBState::think()
 						bgame->pierceShatterPart = obstaclePart;
 					}
 
-					// ----- pWWWa/test: "heavy pass-through" feedback (sound + sparks) ---
-					// Triggers when an obstacle drained more than half of the bullet's
-					// INCOMING energy on the way through it. Fires only on OUTCOME 1 /
-					// OUTCOME 2 (i.e. the bullet still has damage left), so the player
-					// gets a ping + spark cluster on the wall the bullet just barely
-					// punched through, in addition to whatever happens at the final
-					// impact point. OUTCOME 3 (STOPPED) and OUTCOME 4 (SHATTERED) get
-					// their own hit animation+sound via the impact override path.
+					// ----- pWWWa/test: "heavy pass-through" audible feedback ------------
+					// Visual feedback for an obstacle that drained more than half of the
+					// bullet's INCOMING energy on the way through it. Fires only on
+					// OUTCOME 1 / OUTCOME 2 (i.e. the bullet still has damage left), so
+					// the player gets an audible "ping" on the wall the bullet just barely
+					// punched through, in addition to whatever happens at the final impact
+					// point. OUTCOME 3 (STOPPED) and OUTCOME 4 (SHATTERED) already get
+					// their own hit animation + sound via the impact override path.
 					//
-					// Visual mechanism: same `new Explosion` + setVisible(+1) trick we
-					// already use for SHATTER, but pushed into Map::getExplosions() and
-					// left there until the projectile's own final-impact ExplosionBState
-					// fires up and animates it via think(). That means there's a small
-					// VISUAL DELAY between the bullet punching the wall and the spark
-					// appearing — the spark waits for the final impact state to start.
-					// At normal pistol/rifle ranges (5-20 tiles) this is 1-2 frames and
-					// blends with the final impact into a single "pass-through and hit"
-					// flash. On really long shots through multiple walls the delay can
-					// become noticeable; if that ever turns ugly in actual play, we
-					// just remove the spawn block here and keep sound-only.
-					//
-					// Prior attempts (for reference):
-					//   1) Same Explosion-push without ExplosionBState waiting -> sprite
-					//      froze on the wall for ~1 second, then suddenly played when
-					//      the projectile finally stopped. Reason: nothing was calling
-					//      explosion->animate() until then.
-					//   2) Vapor particles (`addVaporParticle`) -> need LUT entries in
-					//      the mod's transparency table that the test setup lacked, so
-					//      the particles were silently discarded.
+					// History of failed visuals (sound-only is intentional):
+					//   1) Direct `new Explosion` push into Map::getExplosions() — sprite
+					//      sat frozen until the projectile's final ExplosionBState fired
+					//      up and animated everything in a batch. Looked laggy.
+					//   2) Vapor particles (addVaporParticle) — silently discarded when
+					//      the mod's transparency LUT didn't cover our colour range.
+					//   3) Explosion+setVisible(+1) + wait-for-final-ExplosionBState —
+					//      sprite still appeared with a noticeable delay after the
+					//      bullet was already past the wall. Looked broken on long
+					//      shots through multiple walls.
+					// Sound-only is the only mechanism that is guaranteed to be in-sync
+					// with the projectile's actual flight position, so we stick with it.
 					if (_projectileImpact != V_UNIT
 						&& bgame->piercePower > 0
 						&& piercePowerDecrement * 2 > damage)
 					{
-						// Audible feedback (instant, position-panned).
 						const int hitSnd = _ammo->getRules()->getHitSound();
 						if (hitSnd != Mod::NO_SOUND)
 						{
 							_parent->getMod()->getSoundByDepth(_parent->getDepth(), hitSnd)
 								->play(-1, _parent->getMap()->getSoundAngle(pos));
 						}
-
-						// Visual spark: pre-seed a hit Explosion sprite into
-						// Map::getExplosions(). The projectile's final ExplosionBState
-						// (created later when the bullet stops) will discover this
-						// sprite in the list, skip its own explode() call (only fires
-						// when the list is empty), and animate ours via think().
-						const int hitAnim   = _ammo->getRules()->getHitAnimation();
-						const int hitFrames = _ammo->getRules()->getHitAnimationFrames();
-						if (hitAnim >= 0)
-						{
-							_parent->getMap()->getExplosions()->push_back(
-								new Explosion(pos, hitAnim, 0, false, false, hitFrames));
-
-							// Same LOS bump as the SHATTER path uses — the wall we just
-							// punched through is, by definition, the wall between the
-							// shooter and where the bullet ended up; if the shooter is
-							// behind a closer wall too, the heavy-pass tile is out of
-							// FOV and Map::draw() would skip the sprite without this.
-							Tile* sparkTile = _parent->getSave()->getTile(pos.toTile());
-							const int visBefore = sparkTile ? sparkTile->getVisible() : -1;
-							if (sparkTile && visBefore == 0)
-							{
-								sparkTile->setVisible(+1);
-							}
-
-							Log(LOG_INFO) << "[PIERCE] HEAVY-PASS sparks+sound at vox=("
-								<< pos.x << ',' << pos.y << ',' << pos.z
-								<< ") decr=" << piercePowerDecrement
-								<< " / damageIn=" << damage
-								<< " (anim=" << hitAnim << " tileVisibleBefore=" << visBefore << ')';
-						}
-						else
-						{
-							Log(LOG_INFO) << "[PIERCE] HEAVY-PASS sound-only at vox=("
-								<< pos.x << ',' << pos.y << ',' << pos.z
-								<< ") decr=" << piercePowerDecrement
-								<< " / damageIn=" << damage
-								<< " (ammo has no hitAnimation)";
-						}
+						Log(LOG_INFO) << "[PIERCE] HEAVY-PASS sound at vox=("
+							<< pos.x << ',' << pos.y << ',' << pos.z
+							<< ") decr=" << piercePowerDecrement
+							<< " / damageIn=" << damage;
 					}
 
 					// ----- remember this obstacle so we don't charge it again next tick -----
