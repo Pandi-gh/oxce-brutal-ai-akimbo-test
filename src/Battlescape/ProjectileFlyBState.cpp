@@ -984,11 +984,22 @@ void ProjectileFlyBState::think()
 								// pWWWa/test: remember the EXACT voxel on the obstacle's
 								// surface so the impact-ExplosionBState below spawns at the
 								// right spot regardless of where Projectile::move() finally
-								// halts the bullet. Also flush remaining trajectory so the
-								// projectile visually freezes here without overshoot.
+								// halts the bullet.
+								//
+								// NB: we deliberately do NOT call proj->skipTrajectory()
+								// here. skipTrajectory() advances the projectile to the
+								// very end of its precomputed trajectory, which can be
+								// many tiles past the obstacle that actually stopped it.
+								// That blew up Projectile::getDistance() and confused the
+								// final ExplosionBState into producing no animation on
+								// some objects (e.g. lamp posts) — see log 2026-06-08
+								// where a V_OBJECT shatter at (28,17) ended up with
+								// finalTile=(14,17). Setting piercePower=0 is enough:
+								// Projectile::move() returns false on the next tick at
+								// the current voxel naturally, so finalTile == shatter
+								// tile and the impact pipeline sees consistent data.
 								bgame->pierceShatterAt   = pos;
 								bgame->pierceShatterPart = obstaclePart;
-								if (proj) proj->skipTrajectory();
 							}
 							else
 							{
