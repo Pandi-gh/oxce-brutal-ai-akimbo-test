@@ -5454,11 +5454,37 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 	// default melee-attack script does
 	//     hit = attack - defense + dodgeBackPenalty - RNG(0..99)
 	// so attackStrength += 10 directly translates into +10% to hit.
-	if (victim->isOut())
+	const bool victimIsOut = victim->isOut();
+	if (victimIsOut)
 	{
 		defenseStrength        = 0;
 		defenseStrengthPenalty = 0;
 		attackStrength        += 10; // "still target" bonus
+	}
+
+	// pWWWa/test: diagnostic log for the melee-attack calculation.
+	// Prints the EXACT inputs the script sees, plus the raw "expected to-hit %"
+	// implied by the default script formula
+	//     hit = attackStrength - defenseStrength + dodgeBackPenalty - RNG(0..99)
+	// so the chance to hit (assuming the default script) is simply
+	//     P(hit) = clamp(attackStrength - defenseStrength + dodgeBackPenalty, 0, 100) %
+	// Compare this number with what the UI cursor showed when you fired.
+	{
+		const int expectedHitPct = std::max(0, std::min(100,
+			attackStrength - defenseStrength + defenseStrengthPenalty));
+		Log(LOG_INFO) << "[MELEE] attacker=" << attack.attacker->getId()
+			<< " (faction=" << (int)attack.attacker->getFaction() << ")"
+			<< " victim=" << victim->getId()
+			<< " (status=" << (int)victim->getStatus()
+			<< " isOut=" << (victimIsOut ? 1 : 0)
+			<< " health=" << victim->getHealth() << '/' << (int)victim->getBaseStats()->health
+			<< " stun=" << victim->getStunlevel() << ")"
+			<< " attType=" << (int)attack.type
+			<< " attStr=" << attackStrength
+			<< " defStr=" << defenseStrength
+			<< " dodgeBackPen=" << defenseStrengthPenalty
+			<< " arc=" << arc
+			<< " => expectedToHit=" << expectedHitPct << '%';
 	}
 
 	auto type = attack.type;
@@ -5476,6 +5502,8 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 		_save
 	);
 
+	const int resultAfterItem = meleeAttackResult;
+
 	meleeAttackResult =  ModScript::scriptFunc1<ModScript::TryMeleeAttackUnit>(
 		victim->getArmor(),
 		meleeAttackResult,
@@ -5483,6 +5511,15 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 		_save
 	);
 
+	// pWWWa/test: diagnostic log for script outputs. The two ModScripts above
+	// can completely override the default formula — if a mod ships a custom
+	// tryMeleeAttackItem / tryMeleeAttackUnit on the weapon's ammo or the
+	// victim's armor, the actual hit decision is whatever that script returns.
+	// Log both intermediate values so it's obvious where any deviation from
+	// the displayed UI accuracy comes from.
+	Log(LOG_INFO) << "[MELEE] script result: afterItem=" << resultAfterItem
+		<< " afterUnit=" << meleeAttackResult
+		<< " => " << (meleeAttackResult > 0 ? "HIT" : "MISS");
 
 	return meleeAttackResult;
 }
