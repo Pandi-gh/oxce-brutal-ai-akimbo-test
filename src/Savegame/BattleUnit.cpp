@@ -4473,7 +4473,12 @@ bool BattleUnit::postMissionProcedures(const Mod *mod, SavedGame *geoscape, Save
 	int manaLoss = mod->getReplenishManaAfterMission() ? 0 : manaLossOriginal;
 	int healthLoss = mod->getReplenishHealthAfterMission() ? 0 : healthLossOriginal;
 
-	auto recovery = (int)RNG::generate((healthLossOriginal*0.5),(healthLossOriginal*1.5));
+	// pWWWa/test: tighter wound-recovery spread. Vanilla used RNG(hp*0.5, hp*1.5)
+	// — that's a 3× max/min ratio, so a soldier who lost 20 HP could recover for
+	// anywhere between 10 and 30 days. Bumped to 0.75..1.25 (1.67× spread), e.g.
+	// 20 HP -> 15..25 days. Still has variation, but no more "lost 5 HP, recover
+	// 2 days OR 8 days" lottery.
+	auto recovery = (int)RNG::generate((healthLossOriginal*0.75),(healthLossOriginal*1.25));
 
 	if (_exp.bravery && stats->bravery < caps.bravery)
 	{
