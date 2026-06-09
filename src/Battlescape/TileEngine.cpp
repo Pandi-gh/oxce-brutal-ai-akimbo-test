@@ -5457,30 +5457,25 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 		attackStrength        += 10; // "still target" bonus
 	}
 
-	// pWWWa/test: Ctrl+click "stun the body under your feet" path.
-	// Vanilla and the ExplosionBState pipeline together force `victim` to be
-	// whoever stands on the impact tile — which, for a tazer-down-at-your-feet
-	// click, is the ATTACKER himself. A redirect in MeleeAttackBState doesn't
-	// help because ExplosionBState resolves the victim independently via
-	// getOverlappingUnit(). So instead of redirecting we just detect this
-	// situation here: attacker == victim AND there is an unconscious body in
-	// the tile's inventory (the actual intended target). In that case we
-	// override the dodge calculation the same way as for victimIsOut: the
-	// attacker doesn't dodge his own swing, and we give the +10 still-target
-	// bonus on top — the click is conceptually a stun on the body, not a
-	// self-attack.
-	bool selfOverUnconscious = false;
+	// pWWWa/test: Ctrl+click "swing at your own tile" path (stun the body
+	// under your feet, break the floor with a sledgehammer, smash an item, …).
+	// Vanilla and the ExplosionBState pipeline force `victim` to be whoever
+	// stands on the impact tile — which for a self-targeted melee is the
+	// ATTACKER himself. A redirect in MeleeAttackBState doesn't help because
+	// ExplosionBState resolves the victim independently via getOverlappingUnit().
+	// Instead we detect this situation here: attacker == victim means the swing
+	// is conceptually NOT a duel with yourself, you're hitting whatever is in
+	// the tile (an unconscious body / a corpse / the floor itself). In that
+	// case we override the dodge calculation the same way as for victimIsOut:
+	// the attacker doesn't dodge his own swing, and we give the +10 still-target
+	// bonus on top — works uniformly for stun, finishing-off, and floor-break.
+	bool selfHit = false;
 	if (!victimIsOut && attack.attacker == victim)
 	{
-		Tile* tile = victim->getTile();
-		if (tile && tile->getTopItem() && tile->getTopItem()->getUnit()
-			&& tile->getTopItem()->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
-		{
-			selfOverUnconscious     = true;
-			defenseStrength        = 0;
-			defenseStrengthPenalty = 0;
-			attackStrength        += 10;
-		}
+		selfHit                = true;
+		defenseStrength        = 0;
+		defenseStrengthPenalty = 0;
+		attackStrength        += 10;
 	}
 
 	// pWWWa/test: melee diagnostic. Keep this on until the still-target
@@ -5493,7 +5488,7 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 			<< " victim=" << victim->getId()
 			<< " (status=" << (int)victim->getStatus()
 			<< " isOut=" << (victimIsOut ? 1 : 0)
-			<< " selfOverBody=" << (selfOverUnconscious ? 1 : 0)
+			<< " selfHit=" << (selfHit ? 1 : 0)
 			<< " health=" << victim->getHealth() << '/' << (int)victim->getBaseStats()->health
 			<< " stun=" << victim->getStunlevel() << ")"
 			<< " attType=" << (int)attack.type
