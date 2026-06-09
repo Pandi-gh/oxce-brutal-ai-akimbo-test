@@ -8,11 +8,9 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-
     defaults:
       run:
         shell: msys2 {0}
-
     steps:
     - uses: actions/checkout@v4
       with:
@@ -24,7 +22,7 @@ jobs:
       with:
         msystem: MINGW64
         update: true
-        cache: true # <--- ВКЛЮЧИЛИ КЭШ ПАКЕТОВ
+        cache: true
         install: >-
           base-devel
           mingw-w64-x86_64-toolchain
@@ -50,7 +48,7 @@ jobs:
           mingw-w64-x86_64-lerc
           mingw-w64-x86_64-ccache
 
-    # 2. Восстанавливаем кэш компилятора с прошлого раза
+    # 2. Кэш компилятора
     - name: Setup ccache cache
       uses: actions/cache@v4
       with:
@@ -59,36 +57,35 @@ jobs:
         restore-keys: |
           ccache-windows-
 
-    # 3. Настраиваем ccache
     - name: Configure ccache
       run: |
         ccache --set-config=cache_dir="$GITHUB_WORKSPACE/.ccache"
         ccache --max-size=1G
         ccache -z
 
-    - name: Bundle resources alongside exe
+    # 3. ВАЖНО: создаём ПУСТЫЕ data-папки в исходниках ДО Configure/Build, потому
+    # что OpenXcom CMake POST_BUILD копирует bin/{TFTD,UFO,common,standard} в
+    # build/bin/, и copy_directory падает если исходной папки нет.
+    # TFTD и UFO в git не индексируются (пустые), их надо создать руками.
+    - name: Create missing data directories
       run: |
-        mkdir -p build/bin/common
-        mkdir -p build/bin/standard
-        mkdir -p build/bin/TFTD
-        mkdir -p build/bin/UFO
-        cp -r bin/common/* build/bin/common/ || true
-        cp -r bin/standard/* build/bin/standard/ || true
+        mkdir -p bin/TFTD
+        mkdir -p bin/UFO
+        mkdir -p bin/common
+        mkdir -p bin/standard
 
-    # 4. ИСПРАВЛЕНИЕ: Говорим CMake использовать ccache для файлов .c и .cpp
     - name: Configure CMake
       run: >
-        cmake -G "MinGW Makefiles" -B build 
-        -DCMAKE_BUILD_TYPE=Release 
-        -DCMAKE_C_COMPILER_LAUNCHER=ccache 
-        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache 
+        cmake -G "MinGW Makefiles" -B build
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         -DCMAKE_FIND_LIBRARY_SUFFIXES=".dll.a;.a"
         -DCMAKE_CXX_STANDARD_LIBRARIES="-Wl,--start-group -lSDL_mixer -lSDL_image -lSDL_gfx -lSDL -l:libFLAC.dll.a -lvorbisfile -lvorbis -logg -lmodplug -lmad -ltiff -lwebp -lsharpyuv -lLerc -ljbig -ldeflate -ljpeg -lpng16 -lzstd -llzma -lz -lbz2 -ldxguid -ldinput8 -ldinput -lwinmm -lole32 -loleaut32 -lsetupapi -luuid -limm32 -lversion -lws2_32 -Wl,--end-group"
 
     - name: Build
       run: cmake --build build -j$(nproc)
 
-    # 5. Выводим статистику (сколько файлов взято из кэша)
     - name: Check ccache statistics
       run: ccache -s
 
@@ -107,6 +104,25 @@ jobs:
         cp -n /mingw64/bin/libgcc_s_seh-1.dll build/bin/ || true
         cp -n /mingw64/bin/libstdc++-6.dll build/bin/ || true
         cp -n /mingw64/bin/libwinpthread-1.dll build/bin/ || true
+
+    # 4. pWWWa/test: гарантируем что в финальном артефакте лежат resource folders.
+    # CMake POST_BUILD уже копирует их в build/bin/, но если что-то пошло не так
+    # (например пустая bin/common из шага 3) — дублируем здесь. На пустую TFTD/UFO
+    # это не повлияет, а common/ и standard/ будут заведомо актуальные из репо.
+    - name: Mirror resources into artifact folder
+      run: |
+        mkdir -p build/bin/common
+        mkdir -p build/bin/standard
+        cp -r bin/common/* build/bin/common/ 2>/dev/null || true
+        cp -r bin/standard/* build/bin/standard/ 2>/dev/null || true
+        # Контрольная проверка: dont-touch.me должен быть в common/
+        if [ ! -f build/bin/common/dont-touch.me ]; then
+          echo "WARNING: build/bin/common/dont-touch.me is missing, game will refuse to start!"
+          ls -la build/bin/common/ | head -20
+        else
+          echo "OK: dont-touch.me present:"
+          cat build/bin/common/dont-touch.me
+        fi
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
