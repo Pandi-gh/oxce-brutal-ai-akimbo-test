@@ -66,12 +66,14 @@ jobs:
         ccache --max-size=1G
         ccache -z
 
-    - name: Create missing data directories
+    - name: Bundle resources alongside exe
       run: |
-        mkdir -p bin/TFTD
-        mkdir -p bin/UFO
-        mkdir -p bin/common
-        mkdir -p bin/standard
+        mkdir -p build/bin/common
+        mkdir -p build/bin/standard
+        mkdir -p build/bin/TFTD
+        mkdir -p build/bin/UFO
+        cp -r bin/common/* build/bin/common/ || true
+        cp -r bin/standard/* build/bin/standard/ || true
 
     # 4. ИСПРАВЛЕНИЕ: Говорим CMake использовать ccache для файлов .c и .cpp
     - name: Configure CMake
