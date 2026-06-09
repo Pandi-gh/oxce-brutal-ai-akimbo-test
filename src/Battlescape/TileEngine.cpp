@@ -3805,7 +3805,6 @@ void TileEngine::explode(BattleActionAttack attack, Position center, int power, 
 	int power_;
 	std::map<Tile*, int> tilesAffected;
 	std::vector<BattleItem*> toRemove;
-	std::set<BattleUnit*> unitsHit1x1;
 	std::pair<std::map<Tile*, int>::iterator, bool> ret;
 
 	if (type->FireBlastCalc)
@@ -3873,59 +3872,38 @@ void TileEngine::explode(BattleActionAttack attack, Position center, int power, 
 						toRemove.clear();
 						if (bu)
 						{
-							// ЗАЩИТА ОТ ДВОЙНОГО ПОПАДАНИЯ НА РАМПАХ
-							bool skipHit = false;
-							
-							// Проверяем только маленьких юнитов 1x1.
-							// Большие юниты (2x2) ДОЛЖНЫ получать урон несколько раз (ванильная механика).
-							if (bu->getArmor()->getSize() == 1)
+							if (dest->getPosition() == centetTile)
 							{
-								if (unitsHit1x1.find(bu) != unitsHit1x1.end())
-								{
-									skipHit = true; // Юнит уже получил бафф/урон от этого взрыва
-								}
-								else
-								{
-									unitsHit1x1.insert(bu); // Запоминаем юнита
-								}
+								// direct hit, similar to ground zero but AI will remember attacker, done for compatibility
+								hitUnit(attack, bu, Position(0, 0, 0), damage, type, rangeAtack);
+							}
+							else if (
+									(
+										Position::distance2dSq(dest->getPosition(), centetTile) < 4
+										&& dest->getPosition().z == centetTile.z
+									)
+									|| dest->getPosition().z > centetTile.z
+								)
+							{
+								// ground zero effect is in effect, or unit is above explosion
+								hitUnit(attack, bu, Position(0, 0, -1), damage, type, rangeAtack);
+							}
+							else
+							{
+								// directional damage relative to explosion position.
+								// units above the explosion will be hit in the legs, units lateral to or below will be hit in the torso
+								hitUnit(attack, bu, centetTile + Position(0, 0, 5) - dest->getPosition(), damage, type, rangeAtack);
 							}
 
-							// Если мы еще не били этого юнита (или это танк 2x2)
-							if (!skipHit)
+							// Affect all items and units in inventory
+							const int itemDamage = bu->getOverKillDamage();
+							if (itemDamage > 0)
 							{
-								if (dest->getPosition() == centetTile)
+								for (auto* bi : *bu->getInventory())
 								{
-									// direct hit, similar to ground zero but AI will remember attacker, done for compatibility
-									hitUnit(attack, bu, Position(0, 0, 0), damage, type, rangeAtack);
-								}
-								else if (
-										(
-											Position::distance2dSq(dest->getPosition(), centetTile) < 4
-											&& dest->getPosition().z == centetTile.z
-										)
-										|| dest->getPosition().z > centetTile.z
-									)
-								{
-									// ground zero effect is in effect, or unit is above explosion
-									hitUnit(attack, bu, Position(0, 0, -1), damage, type, rangeAtack);
-								}
-								else
-								{
-									// directional damage relative to explosion position.
-									// units above the explosion will be hit in the legs, units lateral to or below will be hit in the torso
-									hitUnit(attack, bu, centetTile + Position(0, 0, 5) - dest->getPosition(), damage, type, rangeAtack);
-								}
-
-								// Affect all items and units in inventory
-								const int itemDamage = bu->getOverKillDamage();
-								if (itemDamage > 0)
-								{
-									for (auto* bi : *bu->getInventory())
+									if (!hitUnit(attack, bi->getUnit(), Position(0, 0, 0), itemDamage, type, rangeAtack) && type->getItemFinalDamage(itemDamage) > bi->getRules()->getArmor())
 									{
-										if (!hitUnit(attack, bi->getUnit(), Position(0, 0, 0), itemDamage, type, rangeAtack) && type->getItemFinalDamage(itemDamage) > bi->getRules()->getArmor())
-										{
-											toRemove.push_back(bi);
-										}
+										toRemove.push_back(bi);
 									}
 								}
 							}
@@ -4528,48 +4506,16 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 			}
 		}
 
-	if (check)
-	{
-		// ЛОГИКА ДЛЯ ДЫМА (применяется ко всем стенам и объектам)
-		if (type == DT_SMOKE && !tile->isUfoDoorOpen(part))
+		if (check)
 		{
-			// 1. Если объект прозрачный (окно, дырявый забор, решетка), 
-			// он не блокирует линию обзора (DT_NONE). Дым проходит свободно.
-			if (mapData->getBlock(DT_NONE) == 0)
+			// -1 means we have a regular wall, and anything over 0 means we have a bigwall.
+			if (type == DT_SMOKE && wall != 0 && !tile->isUfoDoorOpen(part))
 			{
-				// Ничего не делаем, blockage остается 0
+				return 256;
 			}
-			else
-			{
-				// 2. Объект сплошной (стена, шкаф, дерево). Проверяем его высоту.
-				// loftID слоев 6-11 определяют верхнюю половину тайла
-				bool hasUpperHalf = false;
-				for (int loft = 6; loft < 12; ++loft)
-				{
-					if (mapData->getLoftID(loft) != 0)
-					{
-						hasUpperHalf = true;
-						break;
-					}
-				}
-				
-				if (hasUpperHalf)
-				{
-					return 256; // Высокая сплошная стена блокирует дым полностью
-				}
-				else
-				{
-					blockage += 8; // Низкий сплошной объект (бордюр, ящик) немного замедляет дым
-				}
-			}
-		}
-		else
-		{
-			// СТАНДАРТНАЯ ЛОГИКА для огня, взрывов, пуль и т.д.
 			blockage += mapData->getBlock(type);
 		}
 	}
-	} // <-- ЭТА СКОБКА ЗАКРЫВАЕТ блок if (mapData)
 
 	// open ufo doors are actually still closed behind the scenes
 	// so a special trick is needed to see if they are open, if they are, they obviously don't block anything
@@ -4577,7 +4523,7 @@ int TileEngine::blockage(Tile *tile, const TilePart part, ItemDamageType type, i
 		blockage = 0;
 
 	return blockage;
-} // <-- А ЭТА СКОБКА ЗАКРЫВАЕТ САМУ ФУНКЦИЮ blockage!
+}
 
 /**
  * Opens a door (if any) by rightclick, or by walking through it. The unit has to face in the right direction.
@@ -5499,6 +5445,21 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 	int defenseStrength = victim->getArmor()->getMeleeDodge(victim);
 	int arc = getArcDirection(getDirectionTo(victim->getPositionVexels(), attack.attacker->getPositionVexels()), victim->getDirection());
 	int defenseStrengthPenalty = Clamp((int)(defenseStrength * (arc * victim->getArmor()->getMeleeDodgeBackPenalty() / 4.0f)), 0, std::max(0, defenseStrength));
+
+	// pWWWa/test: unconscious / dead victim can't dodge. Vanilla used the YAML
+	// meleeDodge stat regardless of the victim's state, so a knocked-out sectoid
+	// kept his ~60% dodge value and the player could whiff 10 times in a row
+	// trying to club him for stun. Now: zero out dodge + give the attacker a
+	// flat +10 accuracy bonus (cumbersome flailing target stays still). The
+	// default melee-attack script does
+	//     hit = attack - defense + dodgeBackPenalty - RNG(0..99)
+	// so attackStrength += 10 directly translates into +10% to hit.
+	if (victim->isOut())
+	{
+		defenseStrength        = 0;
+		defenseStrengthPenalty = 0;
+		attackStrength        += 10; // "still target" bonus
+	}
 
 	auto type = attack.type;
 	auto attacker = attack.attacker;
