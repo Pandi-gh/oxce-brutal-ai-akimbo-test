@@ -148,45 +148,10 @@ void MeleeAttackBState::init()
 	//Correct height for -=ForcedMeleeToFloor=- feature
 	if (_parent->getSave()->isCtrlPressed(true) && _parent->getSave()->getSide() == FACTION_PLAYER && _unit->getFaction() == FACTION_PLAYER && !_unit->getTile()->hasNoFloor())
 	{
-		// pWWWa/test: trace why the "stun the body under your feet" redirect
-		// either fired or didn't. There are several preconditions and the wrong
-		// one being false silently leaves _target = self (the soldier on the
-		// tile), which then rolls melee against his own dodge.
-		{
-			BattleItem* topItem = _target->getTile()->getTopItem();
-			BattleUnit* topItemUnit = topItem ? topItem->getUnit() : nullptr;
-			const int topStatus = topItemUnit ? (int)topItemUnit->getStatus() : -1;
-			Log(LOG_INFO) << "[MELEE-REDIRECT] ctrl+floor branch entered."
-				<< " topItem=" << (topItem ? "YES" : "NO")
-				<< " topItemUnit=" << (topItemUnit ? topItemUnit->getId() : -1)
-				<< " topUnitStatus=" << topStatus
-				<< " (STATUS_UNCONSCIOUS=7)"
-				<< " currentTargetId=" << _target->getId()
-				<< " attackerId=" << _unit->getId();
-		}
-
 		// Check presence of any alive unit under feet and apply their height (it usually is 0, but let check)
 		if (_target->getTile()->getTopItem() && _target->getTile()->getTopItem()->getUnit() && _target->getTile()->getTopItem()->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
 		{
 			height = _target->getTile()->getTopItem()->getUnit()->getPosition().toTile().z;
-
-			// pWWWa/test: Ctrl+click "stun the body under your feet" — REDIRECT the
-			// attack at the unconscious unit itself, instead of leaving _target on
-			// the soldier standing on the tile (which == _unit when you click your
-			// own tile). Vanilla left _target = self, so meleeAttackCalculate ran
-			// "attacker vs attacker" — the soldier rolled against his OWN dodge,
-			// his OWN status said STATUS_AIMING (not isOut), and the unconscious
-			// patch couldn't fire. Now _target points at the actual body, isOut()
-			// returns true, dodge gets zeroed in TileEngine::meleeAttackCalculate,
-			// and the hit chance becomes "attacker's Melee + 10" as intended.
-			BattleUnit* lying = _target->getTile()->getTopItem()->getUnit();
-			if (lying)
-			{
-				Log(LOG_INFO) << "[MELEE-REDIRECT] redirecting _target from "
-					<< _target->getId() << " to lying unit " << lying->getId()
-					<< " (status=" << (int)lying->getStatus() << ")";
-				_target = lying;
-			}
 		}
 		else if (Mod::EXTENDED_TERRAIN_MELEE <= 0 || _action.weapon && (!_action.weapon->getRules()->getDamageType()->ToTile || !_action.weapon->getRules()->getMeleeType()->ToTile))
 		{ // Do not allow to hit floor without activated Terrain Melee feature or for not suitable items for this
@@ -218,12 +183,6 @@ void MeleeAttackBState::init()
 	{
 		_hitNumber = _weapon->getRules()->getAIMeleeHitCount() - 1;
 	}
-
-	Log(LOG_INFO) << "[MELEE-INIT] reached performMeleeAttack(). _target id="
-		<< (_target ? _target->getId() : -1)
-		<< " status=" << (_target ? (int)_target->getStatus() : -1)
-		<< " isOut=" << (_target ? (int)_target->isOut() : -1)
-		<< " _voxel=(" << _voxel.x << ',' << _voxel.y << ',' << _voxel.z << ')';
 
 	performMeleeAttack();
 }
