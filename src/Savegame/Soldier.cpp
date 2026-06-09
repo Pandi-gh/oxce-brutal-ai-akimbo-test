@@ -613,7 +613,21 @@ std::string Soldier::getCraftString(Language *lang, const BaseSumDailyRecovery& 
 	else if (isWounded())
 	{
 		std::ostringstream ss;
-		ss << lang->getString("STR_WOUNDED");
+		// pWWWa/test: when a wounded soldier is ALSO assigned to a craft (only
+		// possible if Options::oxceWoundedAttackMissionIf < 100), the column
+		// must show both pieces of info — "still recovering N days" AND "queued
+		// on craft X" — within the same narrow text cell as before. So we use
+		// a compact "WOUND>N>CraftName" format (with localised STR_WOUNDED_SHORT
+		// instead of the full STR_WOUNDED). When the soldier is not on a craft,
+		// we fall back to the classic STR_WOUNDED>N rendering.
+		if (_craft != 0)
+		{
+			ss << lang->getString("STR_WOUNDED_SHORT");
+		}
+		else
+		{
+			ss << lang->getString("STR_WOUNDED");
+		}
 		ss << ">";
 		auto days = getNeededRecoveryTime(recovery);
 		if (days < 0)
@@ -624,15 +638,9 @@ std::string Soldier::getCraftString(Language *lang, const BaseSumDailyRecovery& 
 		{
 			ss << days;
 		}
-		// pWWWa/test: when a wounded soldier is also assigned to a craft (only
-		// possible after enabling Options::oxceWoundedAttackMissionIf), append
-		// the craft name so the player sees both pieces of info — "still
-		// recovering" AND "scheduled to fly". Without this the craft column
-		// just shows "РАНЕНИЕ>N" and it's impossible to tell at a glance which
-		// craft a wounded soldier was queued onto.
 		if (_craft != 0)
 		{
-			ss << " → ";
+			ss << ">";
 			ss << _craft->getName(lang);
 		}
 		s = ss.str();
