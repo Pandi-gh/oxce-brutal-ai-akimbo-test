@@ -152,6 +152,21 @@ void MeleeAttackBState::init()
 		if (_target->getTile()->getTopItem() && _target->getTile()->getTopItem()->getUnit() && _target->getTile()->getTopItem()->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
 		{
 			height = _target->getTile()->getTopItem()->getUnit()->getPosition().toTile().z;
+
+			// pWWWa/test: Ctrl+click "stun the body under your feet" — REDIRECT the
+			// attack at the unconscious unit itself, instead of leaving _target on
+			// the soldier standing on the tile (which == _unit when you click your
+			// own tile). Vanilla left _target = self, so meleeAttackCalculate ran
+			// "attacker vs attacker" — the soldier rolled against his OWN dodge,
+			// his OWN status said STATUS_AIMING (not isOut), and the unconscious
+			// patch couldn't fire. Now _target points at the actual body, isOut()
+			// returns true, dodge gets zeroed in TileEngine::meleeAttackCalculate,
+			// and the hit chance becomes "attacker's Melee + 10" as intended.
+			BattleUnit* lying = _target->getTile()->getTopItem()->getUnit();
+			if (lying)
+			{
+				_target = lying;
+			}
 		}
 		else if (Mod::EXTENDED_TERRAIN_MELEE <= 0 || _action.weapon && (!_action.weapon->getRules()->getDamageType()->ToTile || !_action.weapon->getRules()->getMeleeType()->ToTile))
 		{ // Do not allow to hit floor without activated Terrain Melee feature or for not suitable items for this
