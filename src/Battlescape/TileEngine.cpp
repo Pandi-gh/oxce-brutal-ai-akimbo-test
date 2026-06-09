@@ -5446,14 +5446,9 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 	int arc = getArcDirection(getDirectionTo(victim->getPositionVexels(), attack.attacker->getPositionVexels()), victim->getDirection());
 	int defenseStrengthPenalty = Clamp((int)(defenseStrength * (arc * victim->getArmor()->getMeleeDodgeBackPenalty() / 4.0f)), 0, std::max(0, defenseStrength));
 
-	// pWWWa/test: unconscious / dead victim can't dodge. Vanilla used the YAML
-	// meleeDodge stat regardless of the victim's state, so a knocked-out sectoid
-	// kept his ~60% dodge value and the player could whiff 10 times in a row
-	// trying to club him for stun. Now: zero out dodge + give the attacker a
-	// flat +10 accuracy bonus (cumbersome flailing target stays still). The
-	// default melee-attack script does
-	//     hit = attack - defense + dodgeBackPenalty - RNG(0..99)
-	// so attackStrength += 10 directly translates into +10% to hit.
+	// pWWWa/test: classic "victim is unconscious / dead" — no dodge.
+	// (Vanilla used the YAML meleeDodge regardless of state, so a knocked-out
+	// sectoid kept his ~60% dodge.)
 	const bool victimIsOut = victim->isOut();
 	if (victimIsOut)
 	{
@@ -5462,28 +5457,49 @@ int TileEngine::meleeAttackCalculate(BattleActionAttack::ReadOnly attack, const 
 		attackStrength        += 10; // "still target" bonus
 	}
 
-	// pWWWa/test: diagnostic log for the melee-attack calculation.
-	// Prints the EXACT inputs the script sees, plus the raw "expected to-hit %"
-	// implied by the default script formula
-	//     hit = attackStrength - defenseStrength + dodgeBackPenalty - RNG(0..99)
-	// so the chance to hit (assuming the default script) is simply
-	//     P(hit) = clamp(attackStrength - defenseStrength + dodgeBackPenalty, 0, 100) %
-	// Compare this number with what the UI cursor showed when you fired.
+	// pWWWa/test: Ctrl+click "stun the body under your feet" path.
+	// Vanilla and the ExplosionBState pipeline together force `victim` to be
+	// whoever stands on the impact tile — which, for a tazer-down-at-your-feet
+	// click, is the ATTACKER himself. A redirect in MeleeAttackBState doesn't
+	// help because ExplosionBState resolves the victim independently via
+	// getOverlappingUnit(). So instead of redirecting we just detect this
+	// situation here: attacker == victim AND there is an unconscious body in
+	// the tile's inventory (the actual intended target). In that case we
+	// override the dodge calculation the same way as for victimIsOut: the
+	// attacker doesn't dodge his own swing, and we give the +10 still-target
+	// bonus on top — the click is conceptually a stun on the body, not a
+	// self-attack.
+	bool selfOverUnconscious = false;
+	if (!victimIsOut && attack.attacker == victim)
+	{
+		Tile* tile = victim->getTile();
+		if (tile && tile->getTopItem() && tile->getTopItem()->getUnit()
+			&& tile->getTopItem()->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
+		{
+			selfOverUnconscious     = true;
+			defenseStrength        = 0;
+			defenseStrengthPenalty = 0;
+			attackStrength        += 10;
+		}
+	}
+
+	// pWWWa/test: melee diagnostic. Keep this on until the still-target
+	// bonus is confirmed in playtests; it's safe to delete the whole
+	// Log() block below once the feature is stable.
 	{
 		const int expectedHitPct = std::max(0, std::min(100,
 			attackStrength - defenseStrength + defenseStrengthPenalty));
 		Log(LOG_INFO) << "[MELEE] attacker=" << attack.attacker->getId()
-			<< " (faction=" << (int)attack.attacker->getFaction() << ")"
 			<< " victim=" << victim->getId()
 			<< " (status=" << (int)victim->getStatus()
 			<< " isOut=" << (victimIsOut ? 1 : 0)
+			<< " selfOverBody=" << (selfOverUnconscious ? 1 : 0)
 			<< " health=" << victim->getHealth() << '/' << (int)victim->getBaseStats()->health
 			<< " stun=" << victim->getStunlevel() << ")"
 			<< " attType=" << (int)attack.type
 			<< " attStr=" << attackStrength
 			<< " defStr=" << defenseStrength
 			<< " dodgeBackPen=" << defenseStrengthPenalty
-			<< " arc=" << arc
 			<< " => expectedToHit=" << expectedHitPct << '%';
 	}
 
