@@ -2611,24 +2611,13 @@ void GeoscapeState::time1Day()
 			project = nullptr;
 
 			// 3b. handle interrogation
-			// pWWWa/test: per-research opt-out via `noCorpseRecovery: true` in YAML.
-			// Default false ⇒ existing research entries keep the vanilla
-			// retainCorpses behaviour. Modders set it to true on peaceful
-			// interrogations (farmers, abductees, civilians) so no body is
-			// magically generated when the topic completes.
-			if (Options::retainCorpses && research->needItem() && research->destroyItem()
-				&& !research->noCorpseRecovery())
-			{
-				auto* ruleUnit = mod->getUnit(research->getName(), false); // don't use getNeededItem()
-				if (ruleUnit)
-				{
-					auto ruleCorpse = ruleUnit->getArmor()->getCorpseGeoscape();
-					if (ruleCorpse && ruleCorpse->isRecoverable() && ruleCorpse->isCorpseRecoverable())
-					{
-						xbase->getStorageItems()->addItem(ruleCorpse);
-					}
-				}
-			}
+			// pWWWa/test: this used to call a copy of the retainCorpses+destroyItem
+			// logic right here, AND `xbase->removeResearch(project)` two lines above
+			// also runs the same logic in Base::removeResearch(). Result: two corpses
+			// per finished interrogation (verified in vanilla too — it's an upstream
+			// bug nobody noticed because retainCorpses is off by default).
+			// Single source of truth lives in Base::removeResearch() now, so the
+			// per-research `noCorpseRecovery: true` opt-out is honoured exactly once.
 			// 3bb. add core research to research diary (before the getonefrees)
 			addResearchDiaryEntryForBase(research, DiscoverySourceType::BASE, xbase, nullptr);
 			if (const RuleResearch* lookupResearch = research->getLookup())
