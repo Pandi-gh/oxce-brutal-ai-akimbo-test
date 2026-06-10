@@ -751,6 +751,12 @@ void BattleUnit::load(const YAML::YamlNodeReader& node, const Mod *mod, const Sc
 
 	reader.tryRead("hasPanickedLastTurn", _hasPanickedLastTurn);
 
+	// pWWWa/test: brutalAI=3 (Mixed) runtime flags. Default false ⇒ old saves
+	// just have no value here, the unit gets re-rolled by
+	// SavedBattleGame::updateMixedAggressionFlags() on the next hostile turn.
+	reader.tryRead("leeroyJenkinsRuntime", _isLeeroyJenkinsRuntime);
+	reader.tryRead("sneakyRuntime",        _isSneakyRuntime);
+
 	_scriptValues.load(reader, shared);
 }
 
@@ -927,6 +933,11 @@ void BattleUnit::save(YAML::YamlNodeWriter writer, const ScriptGlobal *shared) c
 	writer.write("aggression", _aggression);
 
 	writer.write("hasPanickedLastTurn", _hasPanickedLastTurn);
+
+	// pWWWa/test: brutalAI=3 (Mixed) runtime flags. Only written when set so
+	// vanilla saves stay clean. Old engines just ignore the unknown field.
+	if (_isLeeroyJenkinsRuntime) writer.write("leeroyJenkinsRuntime", _isLeeroyJenkinsRuntime);
+	if (_isSneakyRuntime)        writer.write("sneakyRuntime",        _isSneakyRuntime);
 
 	// Save script values using the new writer method
 	_scriptValues.save(writer, shared);
@@ -6446,7 +6457,15 @@ bool BattleUnit::wasMaxTusOfUpdate()
 
 bool BattleUnit::isLeeroyJenkins() const
 {
-	return _isLeeroyJenkins || (_faction == FACTION_HOSTILE && Options::brutalAI == 2) || (_faction == FACTION_HOSTILE && Options::brutalCivilians == 2);
+	// pWWWa/test: brutalAI/Civilians = 3 is "Mixed" — units are NOT all Leeroy
+	// from turn 1, instead each individual gets the runtime flag flipped on
+	// by SavedBattleGame::updateMixedAggressionFlags() over the course of the
+	// mission, with probabilities driven by Unit::getUnitAggression().
+	const bool mixedHostile = (_faction == FACTION_HOSTILE) && (Options::brutalAI == 3 || Options::brutalCivilians == 3);
+	return _isLeeroyJenkins
+		|| (_faction == FACTION_HOSTILE && Options::brutalAI == 2)
+		|| (_faction == FACTION_HOSTILE && Options::brutalCivilians == 2)
+		|| (mixedHostile && _isLeeroyJenkinsRuntime);
 }
 
 float BattleUnit::getAggressiveness(std::string missionType) const
