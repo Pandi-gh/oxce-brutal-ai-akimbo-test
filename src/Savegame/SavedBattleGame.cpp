@@ -48,6 +48,7 @@
 #include "../Mod/RuleStartingCondition.h"
 #include "../Mod/RuleEnviroEffects.h"
 #include "../Mod/RuleItem.h"
+#include "../Mod/Unit.h" // pWWWa/test: for getUnitAggression() in brutalAI=3
 #include "../Mod/RuleSoldier.h"
 #include "../Mod/RuleSoldierBonus.h"
 #include "../Mod/RuleWeaponSet.h"
@@ -1505,6 +1506,15 @@ void SavedBattleGame::endTurn()
 		_selectedUnit =  0;
 		_undoUnit = nullptr;
 		_side = FACTION_HOSTILE;
+
+		// pWWWa/test: brutalAI=3 (Mixed) per-turn aggression update. Runs only
+		// at the player→hostile transition, exactly when hostile units are
+		// about to act. Per-unit Leeroy/Sneaky flags get probabilistically
+		// flipped according to the Unit::getUnitAggression() table.
+		if (Options::brutalAI == 3 || Options::brutalCivilians == 3)
+		{
+			updateMixedAggressionFlags();
+		}
 	}
 	else if (_side == FACTION_HOSTILE)
 	{
@@ -3696,6 +3706,174 @@ std::string debugDisplayScript(const SavedBattleGame* p)
 	else
 	{
 		return "null";
+	}
+}
+
+/**
+ * pWWWa/test: brutalAI=3 (Mixed) — per-turn aggression flag update.
+ *
+ * Each hostile unit gets two "sticky" runtime flags:
+ *   _isLeeroyJenkinsRuntime — once true, the unit charges enemies (S&D mode).
+ *   _isSneakyRuntime        — once true, the unit avoids tiles visible to the
+ *                             player when pathfinding (cower-in-cover).
+ *
+ * On turn 1, both flags are rolled INDEPENDENTLY using `startLeeroy%` and
+ * `startSneaky%` columns of the table below — so a unit can end up with any
+ * of 4 combinations:
+ *   Sneaky ✓ Leeroy ✗  →  Camper (Brutal default behaviour, but avoids LoS)
+ *   Sneaky ✗ Leeroy ✗  →  Plain Brutal (standard cautious AI)
+ *   Sneaky ✓ Leeroy ✓  →  Hitman      (charges via shadows)
+ *   Sneaky ✗ Leeroy ✓  →  Zombie/S&D  (charges in the open)
+ *
+ * On every following turn, each non-Leeroy unit rolls Δleeroy% to flip the
+ * flag on; each Sneaky unit rolls ΔsneakyOff% to lose the flag. Caps:
+ * Leeroy growth stops when the % of Leeroy units in the hostile faction
+ * reaches `maxLeeroy%`. Sneaky removal stops when the % of Sneaky units in
+ * the faction falls to `minSneaky%`. (For maxLeeroy=100 / minSneaky=0 the
+ * caps are simply never reached.)
+ *
+ * Table is indexed by `aggression/10` (0..10 inclusive, 11 rows). Source for
+ * the numbers: user-provided spreadsheet 2026-06-10.
+ */
+namespace
+{
+struct AggressionRow
+{
+	int startLeeroyPct;     // turn-1 chance to start as Leeroy
+	int perTurnLeeroyPct;   // chance each subsequent turn for non-Leeroy unit
+	int maxLeeroyPct;       // hard cap on % of Leeroy units in the faction
+	int startSneakyPct;     // turn-1 chance to start as Sneaky
+	int perTurnLoseSneakyPct; // chance each subsequent turn to lose Sneaky
+	int minSneakyPct;       // hard cap on the lower bound of Sneaky units
+};
+
+// 11 rows: aggression = 0, 10, 20, ..., 100.
+static constexpr AggressionRow kAggrTable[11] = {
+	/* 0   */ {  0,  2,  15, 100,  5, 40 },
+	/* 10  */ {  2,  3,  20, 100,  7, 30 },
+	/* 20  */ {  5,  5,  30, 100, 10, 25 },
+	/* 30  */ { 10,  7,  40,  90, 12, 20 },
+	/* 40  */ { 15, 10,  55,  80, 15, 15 },
+	/* 50  */ { 25, 12,  70,  70, 18, 10 },
+	/* 60  */ { 35, 14,  80,  55, 20,  5 },
+	/* 70  */ { 50, 16,  90,  40, 22,  0 },
+	/* 80  */ { 65, 18,  95,  25, 25,  0 },
+	/* 90  */ { 80, 20, 100,  15, 30,  0 },
+	/* 100 */ {100,  0, 100,   0,  0,  0 },
+};
+
+static const AggressionRow& aggrRowFor(int unitAggression)
+{
+	int idx = unitAggression / 10;
+	if (idx < 0)  idx = 0;
+	if (idx > 10) idx = 10;
+	return kAggrTable[idx];
+}
+} // anonymous namespace
+
+void SavedBattleGame::updateMixedAggressionFlags()
+{
+	// Snapshot: count current hostile population and how many of them already
+	// hold each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
+	int hostileTotal = 0, leeroyCount = 0, sneakyCount = 0;
+	for (auto* bu : _units)
+	{
+		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
+		if (bu->isOut() || bu->isOutThresholdExceed())   continue;
+		++hostileTotal;
+		if (bu->isLeeroyJenkinsRuntime()) ++leeroyCount;
+		if (bu->isSneakyRuntime())        ++sneakyCount;
+	}
+	if (hostileTotal == 0) return;
+
+	const bool isTurnOne = (_turn <= 1);
+
+	for (auto* bu : _units)
+	{
+		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
+		if (bu->isOut() || bu->isOutThresholdExceed())   continue;
+
+		// Skip units pinned by ruleset to be Leeroy / not Brutal — they
+		// already have their behaviour locked, we don't override it.
+		// (isLeeroyJenkins() now combines _isLeeroyJenkins flag with runtime;
+		//  here we look at the raw ruleset bit via Unit rules.)
+		const Unit* ur = bu->getUnitRules();
+		const bool rulesetLeeroy = ur && ur->isLeeroyJenkins();
+
+		const int aggr = ur ? ur->getUnitAggression() : 50;
+		const auto& row = aggrRowFor(aggr);
+
+		// --- Leeroy flag ---
+		if (!bu->isLeeroyJenkinsRuntime() && !rulesetLeeroy)
+		{
+			const int currentLeeroyPct = (leeroyCount * 100) / hostileTotal;
+			const bool underCap = currentLeeroyPct < row.maxLeeroyPct;
+			const int chance = isTurnOne ? row.startLeeroyPct : row.perTurnLeeroyPct;
+			if (underCap && chance > 0)
+			{
+				const int roll = RNG::generate(0, 99);
+				if (roll < chance)
+				{
+					bu->setLeeroyJenkinsRuntime(true);
+					++leeroyCount;
+					Log(LOG_INFO) << "[AGGR] turn=" << _turn
+						<< (isTurnOne ? " init:" : " step:")
+						<< " unit=" << bu->getId()
+						<< " type=" << bu->getType()
+						<< " unitAggression=" << aggr
+						<< " leeroyChance=" << chance
+						<< "% roll=" << roll
+						<< " (currentLeeroy=" << currentLeeroyPct
+						<< "%/cap=" << row.maxLeeroyPct
+						<< "%) => LEEROY ON";
+				}
+			}
+		}
+
+		// --- Sneaky flag ---
+		if (isTurnOne)
+		{
+			// Independent roll for the Sneaky starting flag.
+			if (!bu->isSneakyRuntime() && row.startSneakyPct > 0)
+			{
+				const int roll = RNG::generate(0, 99);
+				if (roll < row.startSneakyPct)
+				{
+					bu->setSneakyRuntime(true);
+					++sneakyCount;
+					Log(LOG_INFO) << "[AGGR] turn=" << _turn << " init:"
+						<< " unit=" << bu->getId()
+						<< " type=" << bu->getType()
+						<< " unitAggression=" << aggr
+						<< " startSneaky=" << row.startSneakyPct
+						<< "% roll=" << roll
+						<< " => SNEAKY ON";
+				}
+			}
+		}
+		else if (bu->isSneakyRuntime() && row.perTurnLoseSneakyPct > 0)
+		{
+			const int currentSneakyPct = (sneakyCount * 100) / hostileTotal;
+			const bool aboveFloor = currentSneakyPct > row.minSneakyPct;
+			if (aboveFloor)
+			{
+				const int roll = RNG::generate(0, 99);
+				if (roll < row.perTurnLoseSneakyPct)
+				{
+					bu->setSneakyRuntime(false);
+					--sneakyCount;
+					Log(LOG_INFO) << "[AGGR] turn=" << _turn << " step:"
+						<< " unit=" << bu->getId()
+						<< " type=" << bu->getType()
+						<< " unitAggression=" << aggr
+						<< " sneakyLossChance=" << row.perTurnLoseSneakyPct
+						<< "% roll=" << roll
+						<< " (currentSneaky=" << currentSneakyPct
+						<< "%/floor=" << row.minSneakyPct
+						<< "%) => SNEAKY OFF";
+				}
+			}
+		}
 	}
 }
 
