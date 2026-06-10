@@ -6457,15 +6457,21 @@ bool BattleUnit::wasMaxTusOfUpdate()
 
 bool BattleUnit::isLeeroyJenkins() const
 {
-	// pWWWa/test: brutalAI/Civilians = 3 is "Mixed" — units are NOT all Leeroy
-	// from turn 1, instead each individual gets the runtime flag flipped on
-	// by SavedBattleGame::updateMixedAggressionFlags() over the course of the
-	// mission, with probabilities driven by Unit::getUnitAggression().
-	const bool mixedHostile = (_faction == FACTION_HOSTILE) && (Options::brutalAI == 3 || Options::brutalCivilians == 3);
+	// pWWWa/test: brutalAI/Civilians = 3 is "DynamicMixed" — units are NOT
+	// all Leeroy from turn 1, instead each individual gets the runtime flag
+	// flipped on by SavedBattleGame::updateMixedAggressionFlags() over the
+	// course of the mission, with probabilities driven by
+	// Unit::getUnitAggression().
+	// Applies to BOTH hostile (aliens, opt: brutalAI) and neutral (animals,
+	// cultists, etc., opt: brutalCivilians) factions, matching the existing
+	// per-faction Brutal options.
+	const bool dynMixed =
+		((_faction == FACTION_HOSTILE) && (Options::brutalAI       == 3)) ||
+		((_faction == FACTION_NEUTRAL) && (Options::brutalCivilians == 3));
 	return _isLeeroyJenkins
-		|| (_faction == FACTION_HOSTILE && Options::brutalAI == 2)
-		|| (_faction == FACTION_HOSTILE && Options::brutalCivilians == 2)
-		|| (mixedHostile && _isLeeroyJenkinsRuntime);
+		|| (_faction == FACTION_HOSTILE && Options::brutalAI       == 2)
+		|| (_faction == FACTION_NEUTRAL && Options::brutalCivilians == 2)
+		|| (dynMixed && _isLeeroyJenkinsRuntime);
 }
 
 float BattleUnit::getAggressiveness(std::string missionType) const
