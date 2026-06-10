@@ -111,7 +111,14 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	// i'm DONE with these out of bounds errors.
 	if (endPosition.x > _save->getMapSizeX() - size || endPosition.y > _save->getMapSizeY() - size || endPosition.x < 0 || endPosition.y < 0) return;
 
-	bool sneak = Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal();
+	// pWWWa/test: classic vanilla "Sneaky AI" option only kicks in for non-Brutal
+	// units. With brutalAI=3 (Mixed) we want individual Brutal units to ALSO be
+	// able to sneak when SavedBattleGame::updateMixedAggressionFlags() has flipped
+	// their per-unit runtime Sneaky flag on. Either source enables the effect.
+	bool sneak = (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
+		|| ((Options::brutalAI == 3 || Options::brutalCivilians == 3)
+			&& unit->getFaction() == FACTION_HOSTILE
+			&& unit->isSneakyRuntime());
 
 	auto movementType = getMovementType(unit, missileTarget, bam);
 	if (missileTarget != 0 && maxTUCost == -1 && bam == BAM_MISSILE) // pathfinding for missile
