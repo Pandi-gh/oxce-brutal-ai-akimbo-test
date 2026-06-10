@@ -416,6 +416,12 @@ public:
 	const RuleCraftDeployment& getCustomDeployment(const RuleCraft* rule) const;
 	/// Ends the turn.
 	void endTurn();
+	/// pWWWa/test: brutalAI=3 (Mixed) per-turn aggression update. Walks all
+	/// hostile units once per hostile turn and probabilistically sets the
+	/// runtime Leeroy / removes the runtime Sneaky flag, based on a table
+	/// indexed by Unit::getUnitAggression() (0..100). Sticky: once a unit
+	/// gets Leeroy it keeps it; once it loses Sneaky it stays non-Sneaky.
+	void updateMixedAggressionFlags();
 	/// Gets animation frame.
 	int getAnimFrame() const;
 	/// Increase animation frame.
