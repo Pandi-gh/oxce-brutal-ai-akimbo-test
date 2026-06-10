@@ -393,8 +393,12 @@ void OptionsAdvancedState::lstOptionsClick(Action *action)
 		}
 		else if (i == &Options::brutalAI || i == &Options::brutalCivilians)
 		{
+			// pWWWa/test: 3 = "Mixed" (Brutal-base, with per-unit aggression
+			// table that gradually flips some units from cover-seeker (Sneaky)
+			// to chase-down (Leeroy) over the course of the mission). 0..2
+			// keep their classic meaning (0=vanilla, 1=Brutal, 2=Seek&Destroy).
 			min = 0;
-			max = 2;
+			max = 3;
 		}
 		else if (i == &Options::battleExplosionHeight)
 		{
