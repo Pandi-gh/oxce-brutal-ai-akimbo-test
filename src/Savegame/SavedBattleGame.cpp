@@ -3709,6 +3709,8 @@ std::string debugDisplayScript(const SavedBattleGame* p)
 	}
 }
 
+} // namespace
+
 /**
  * pWWWa/test: brutalAI=3 (Mixed) — per-turn aggression flag update.
  *
@@ -3775,14 +3777,18 @@ void SavedBattleGame::updateMixedAggressionFlags()
 {
 	// Snapshot: count current hostile population and how many of them already
 	// hold each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
+	// pWWWa/test: unconscious / stunned hostiles ARE included on purpose —
+	// they may wake up later in the mission and should already have flags
+	// assigned according to the same aggression curve as everyone else.
+	// Only truly dead units are excluded.
 	int hostileTotal = 0, leeroyCount = 0, sneakyCount = 0;
-	int hostileOutOfAction = 0;
+	int hostileSkippedDead = 0;
 	for (auto* bu : _units)
 	{
 		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
-		if (bu->isOut() || bu->isOutThresholdExceed())
+		if (bu->getStatus() == STATUS_DEAD)
 		{
-			++hostileOutOfAction;
+			++hostileSkippedDead;
 			continue;
 		}
 		++hostileTotal;
@@ -3795,8 +3801,8 @@ void SavedBattleGame::updateMixedAggressionFlags()
 	// and the for-loop below produces no per-unit log lines.
 	Log(LOG_INFO) << "[AGGR] updateMixedAggressionFlags ENTER"
 		<< " turn=" << _turn
-		<< " hostilesActive=" << hostileTotal
-		<< " hostilesOut=" << hostileOutOfAction
+		<< " hostilesAlive=" << hostileTotal
+		<< " hostilesDead=" << hostileSkippedDead
 		<< " currentLeeroy=" << leeroyCount
 		<< " currentSneaky=" << sneakyCount;
 
@@ -3807,7 +3813,10 @@ void SavedBattleGame::updateMixedAggressionFlags()
 	for (auto* bu : _units)
 	{
 		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
-		if (bu->isOut() || bu->isOutThresholdExceed())   continue;
+		// pWWWa/test: do NOT skip unconscious/stunned hostiles — they may
+		// recover later this mission and should carry already-assigned flags.
+		// Skip only the dead (no point rolling for a corpse).
+		if (bu->getStatus() == STATUS_DEAD)              continue;
 
 		// Skip units pinned by ruleset to be Leeroy / not Brutal — they
 		// already have their behaviour locked, we don't override it.
@@ -3893,7 +3902,6 @@ void SavedBattleGame::updateMixedAggressionFlags()
 	}
 }
 
-} // namespace
 
 /**
  * Register Armor in script parser.
