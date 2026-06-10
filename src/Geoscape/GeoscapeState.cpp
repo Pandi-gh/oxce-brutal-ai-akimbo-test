@@ -2611,7 +2611,13 @@ void GeoscapeState::time1Day()
 			project = nullptr;
 
 			// 3b. handle interrogation
-			if (Options::retainCorpses && research->needItem() && research->destroyItem())
+			// pWWWa/test: per-research opt-out via `noCorpseRecovery: true` in YAML.
+			// Default false ⇒ existing research entries keep the vanilla
+			// retainCorpses behaviour. Modders set it to true on peaceful
+			// interrogations (farmers, abductees, civilians) so no body is
+			// magically generated when the topic completes.
+			if (Options::retainCorpses && research->needItem() && research->destroyItem()
+				&& !research->noCorpseRecovery())
 			{
 				auto* ruleUnit = mod->getUnit(research->getName(), false); // don't use getNeededItem()
 				if (ruleUnit)
