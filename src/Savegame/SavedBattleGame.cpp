@@ -3776,14 +3776,30 @@ void SavedBattleGame::updateMixedAggressionFlags()
 	// Snapshot: count current hostile population and how many of them already
 	// hold each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
 	int hostileTotal = 0, leeroyCount = 0, sneakyCount = 0;
+	int hostileOutOfAction = 0;
 	for (auto* bu : _units)
 	{
 		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
-		if (bu->isOut() || bu->isOutThresholdExceed())   continue;
+		if (bu->isOut() || bu->isOutThresholdExceed())
+		{
+			++hostileOutOfAction;
+			continue;
+		}
 		++hostileTotal;
 		if (bu->isLeeroyJenkinsRuntime()) ++leeroyCount;
 		if (bu->isSneakyRuntime())        ++sneakyCount;
 	}
+
+	// pWWWa/test: entry log so it's obvious whether the function is being
+	// called at all. Useful when the map only has unconscious/dead hostiles
+	// and the for-loop below produces no per-unit log lines.
+	Log(LOG_INFO) << "[AGGR] updateMixedAggressionFlags ENTER"
+		<< " turn=" << _turn
+		<< " hostilesActive=" << hostileTotal
+		<< " hostilesOut=" << hostileOutOfAction
+		<< " currentLeeroy=" << leeroyCount
+		<< " currentSneaky=" << sneakyCount;
+
 	if (hostileTotal == 0) return;
 
 	const bool isTurnOne = (_turn <= 1);
