@@ -107,6 +107,12 @@ void Unit::load(const YAML::YamlNodeReader& node, Mod* mod)
 
     // Custom additions
     reader.tryRead("isBrutal", _isBrutal);
+    // pWWWa/test: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
+    // default 50. Higher = more units charge from turn 1 and faster all
+    // remaining ones lose their cower-in-cover behaviour over the next turns.
+    reader.tryRead("unitAggression", _unitAggression);
+    if (_unitAggression < 0)   _unitAggression = 0;
+    if (_unitAggression > 100) _unitAggression = 100;
     reader.tryRead("isNotBrutal", _isNotBrutal);
     reader.tryRead("isCheatOnMovement", _isCheatOnMovement);
 
