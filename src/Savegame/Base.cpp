@@ -1544,8 +1544,17 @@ void Base::removeResearch(ResearchProject * project)
 			{
 				getStorageItems()->addItem(ruleResearch->getNeededItem(), 1);
 			}
-			else if (Options::retainCorpses && ruleResearch->destroyItem())
+			else if (Options::retainCorpses && ruleResearch->destroyItem()
+				&& !ruleResearch->noCorpseRecovery())
 			{
+				// pWWWa/test: same per-research opt-out as in GeoscapeState.cpp.
+				// Both code paths run for the SAME completed interrogation
+				// (GeoscapeState handles the topic, then calls removeResearch
+				// here which would add yet another corpse), so this guard is
+				// required to actually suppress the spawn — without it the
+				// noCorpseRecovery flag in YAML zeroed one path but the other
+				// kept doubling corpses (and was the source of the original
+				// "two bodies after a single interrogation" complaint).
 				auto* ruleUnit = _mod->getUnit(ruleResearch->getName(), false); // research & item & unit should have same name to work correctly
 				if (ruleUnit)
 				{
