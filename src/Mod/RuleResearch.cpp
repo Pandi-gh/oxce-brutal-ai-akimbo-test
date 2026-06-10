@@ -75,6 +75,11 @@ void RuleResearch::load(const YAML::YamlNodeReader& node, Mod* mod, const ModScr
 	reader.tryRead("unlockFinalMission", _unlockFinalMission);
 	reader.tryRead("repeatable", _repeatable);
 	reader.tryRead("listOrder", _listOrder);
+	// pWWWa/test: opt-out flag for the global Options::retainCorpses behaviour.
+	// Set to true on research entries that represent peaceful interrogations
+	// (farmers, civilians, abductees) so a corpse is NOT spawned at the base
+	// when the research completes, even though needItem + destroyItem are set.
+	reader.tryRead("noCorpseRecovery", _noCorpseRecovery);
 
 	_scriptValues.load(reader, parsers.getShared());
 }
