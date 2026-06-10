@@ -62,6 +62,13 @@ class RuleResearch
 	bool _needItem, _destroyItem, _returnsItem = false, _unlockFinalMission;
 	bool _repeatable;
 	int _listOrder;
+	/// pWWWa/test: if true, this research will NOT spawn a recovered corpse
+	/// even when Options::retainCorpses is on and needItem/destroyItem are set.
+	/// Useful for "peaceful" interrogations (farmers, abductees, civilians):
+	/// nobody died, so no body is added to base stores. Default false ⇒
+	/// behaviour is identical to the existing global retainCorpses logic for
+	/// every existing research entry, no balance shift unless modder opts in.
+	bool _noCorpseRecovery = false;
 
 	ScriptValues<RuleResearch> _scriptValues;
 public:
@@ -100,6 +107,9 @@ public:
 	bool returnItem() const { return _returnsItem; }
 	/// Checks if this ResearchProject hold reserched item during research.
 	bool isHoldingNeededItem() const { return _needItem && (_destroyItem || _returnsItem); }
+	/// pWWWa/test: see _noCorpseRecovery above. true ⇒ suppress automatic
+	/// corpse spawning on research completion (peaceful interrogation flag).
+	bool noCorpseRecovery() const { return _noCorpseRecovery; }
 
 	/// Check if this ResearchProject is unlocking final mission, it can be only one!
 	bool unlockFinalMission() const { return _unlockFinalMission; }
