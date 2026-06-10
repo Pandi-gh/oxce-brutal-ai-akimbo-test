@@ -3775,17 +3775,27 @@ static const AggressionRow& aggrRowFor(int unitAggression)
 
 void SavedBattleGame::updateMixedAggressionFlags()
 {
-	// Snapshot: count current hostile population and how many of them already
-	// hold each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
-	// pWWWa/test: unconscious / stunned hostiles ARE included on purpose —
-	// they may wake up later in the mission and should already have flags
-	// assigned according to the same aggression curve as everyone else.
-	// Only truly dead units are excluded.
+	// Snapshot: count current population and how many of them already hold
+	// each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
+	// pWWWa/test: covers BOTH factions controlled by brutal-AI:
+	//   FACTION_HOSTILE  — aliens, gated by Options::brutalAI == 3
+	//   FACTION_NEUTRAL  — non-civilian beasts, cultists, hostile wildlife
+	//                       (rats, werewolves, ...), gated by Options::brutalCivilians == 3
+	// Each unit is included only if the appropriate option is on, otherwise it
+	// stays in the old behaviour (vanilla / Brutal / Seek&Destroy).
+	// Unconscious / stunned units ARE included on purpose — they may recover
+	// later this mission and should carry already-assigned flags. Only the
+	// dead are skipped.
 	int hostileTotal = 0, leeroyCount = 0, sneakyCount = 0;
 	int hostileSkippedDead = 0;
+	const bool wantHostile = (Options::brutalAI       == 3);
+	const bool wantNeutral = (Options::brutalCivilians == 3);
 	for (auto* bu : _units)
 	{
-		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
+		const UnitFaction f = bu->getOriginalFaction();
+		if (f == FACTION_HOSTILE && !wantHostile) continue;
+		if (f == FACTION_NEUTRAL && !wantNeutral) continue;
+		if (f != FACTION_HOSTILE && f != FACTION_NEUTRAL) continue;
 		if (bu->getStatus() == STATUS_DEAD)
 		{
 			++hostileSkippedDead;
@@ -3808,12 +3818,25 @@ void SavedBattleGame::updateMixedAggressionFlags()
 
 	if (hostileTotal == 0) return;
 
-	const bool isTurnOne = (_turn <= 1);
+	// pWWWa/test: two independent init triggers for the two flags. Sneaky and
+	// Leeroy are rolled independently in the body, so let each one decide on
+	// its own whether the "starting %" roll still needs to happen.
+	//   * isLeeroyInit — first hostile turn of fresh mission, or no unit has
+	//     a runtime Leeroy yet (e.g. upgraded binary mid-mission).
+	//   * isSneakyInit — same, but for Sneaky. Crucially this stays true even
+	//     after Leeroy flags have been distributed for several turns.
+	const bool isLeeroyInit = (_turn <= 1) || (leeroyCount == 0);
+	const bool isSneakyInit = (_turn <= 1) || (sneakyCount == 0);
+	// kept as compatibility name for the per-Leeroy "init" log tag below
+	const bool isTurnOne    = isLeeroyInit;
 
 	for (auto* bu : _units)
 	{
-		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
-		// pWWWa/test: do NOT skip unconscious/stunned hostiles — they may
+		const UnitFaction f = bu->getOriginalFaction();
+		if (f == FACTION_HOSTILE && !wantHostile) continue;
+		if (f == FACTION_NEUTRAL && !wantNeutral) continue;
+		if (f != FACTION_HOSTILE && f != FACTION_NEUTRAL) continue;
+		// pWWWa/test: do NOT skip unconscious/stunned units — they may
 		// recover later this mission and should carry already-assigned flags.
 		// Skip only the dead (no point rolling for a corpse).
 		if (bu->getStatus() == STATUS_DEAD)              continue;
@@ -3856,7 +3879,11 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		}
 
 		// --- Sneaky flag ---
-		if (isTurnOne)
+		// pWWWa/test: uses its OWN init detector (isSneakyInit) so a save
+		// that already saw Leeroy distribution but never had Sneaky rolled
+		// (e.g. upgrade from a binary that didn't ship Sneaky-runtime) still
+		// gets the starting % treatment on the next hostile turn.
+		if (isSneakyInit)
 		{
 			// Independent roll for the Sneaky starting flag.
 			if (!bu->isSneakyRuntime() && row.startSneakyPct > 0)
