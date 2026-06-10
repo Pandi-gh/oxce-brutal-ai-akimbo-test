@@ -112,13 +112,16 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	if (endPosition.x > _save->getMapSizeX() - size || endPosition.y > _save->getMapSizeY() - size || endPosition.x < 0 || endPosition.y < 0) return;
 
 	// pWWWa/test: classic vanilla "Sneaky AI" option only kicks in for non-Brutal
-	// units. With brutalAI=3 (Mixed) we want individual Brutal units to ALSO be
-	// able to sneak when SavedBattleGame::updateMixedAggressionFlags() has flipped
-	// their per-unit runtime Sneaky flag on. Either source enables the effect.
-	bool sneak = (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
-		|| ((Options::brutalAI == 3 || Options::brutalCivilians == 3)
-			&& unit->getFaction() == FACTION_HOSTILE
-			&& unit->isSneakyRuntime());
+	// units. With brutalAI/Civilians=3 (DynamicMixed) we want individual Brutal
+	// units to ALSO be able to sneak when SavedBattleGame::updateMixedAggressionFlags()
+	// has flipped their per-unit runtime Sneaky flag on. Either source enables
+	// the effect. Covers both hostile (aliens) and neutral (animals/cultists).
+	const UnitFaction f = unit->getFaction();
+	const bool dynMixed =
+		((f == FACTION_HOSTILE) && (Options::brutalAI       == 3)) ||
+		((f == FACTION_NEUTRAL) && (Options::brutalCivilians == 3));
+	bool sneak = (Options::sneakyAI && f == FACTION_HOSTILE && !unit->isBrutal())
+		|| (dynMixed && unit->isSneakyRuntime());
 
 	auto movementType = getMovementType(unit, missileTarget, bam);
 	if (missileTarget != 0 && maxTUCost == -1 && bam == BAM_MISSILE) // pathfinding for missile
