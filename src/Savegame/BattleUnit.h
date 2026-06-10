@@ -182,6 +182,15 @@ private:
 	bool _breathing;
 	bool _hidingForTurn, _floorAbove, _respawn, _alreadyRespawned;
 	bool _isLeeroyJenkins;	// always charges enemy, never retreats.
+	/// pWWWa/test: runtime Leeroy flag for brutalAI=3 (Mixed). Set once per
+	/// unit during the mission (sticky, never reverts), separately from the
+	/// ruleset _isLeeroyJenkins flag. Combined by isLeeroyJenkins() below.
+	bool _isLeeroyJenkinsRuntime = false;
+	/// pWWWa/test: runtime Sneaky flag for brutalAI=3 (Mixed). Starts true
+	/// for most units on turn 1 (% controlled by Unit::getUnitAggression()),
+	/// individually lost on later turns. Read by Pathfinding to make the unit
+	/// avoid tiles currently visible to the player.
+	bool _isSneakyRuntime = false;
 	bool _isAggressive;
 	bool _isBrutal;
 	bool _isNotBrutal;
@@ -904,6 +913,13 @@ public:
 		_isLeeroyJenkins = !_isLeeroyJenkins;
 		return _isLeeroyJenkins;
 	}
+	/// pWWWa/test: runtime Leeroy/Sneaky accessors for brutalAI=3 (Mixed).
+	/// The "sticky" flags are set by SavedBattleGame::updateMixedAggressionFlags()
+	/// at the start of each hostile turn based on Unit::getUnitAggression().
+	bool isLeeroyJenkinsRuntime() const { return _isLeeroyJenkinsRuntime; }
+	void setLeeroyJenkinsRuntime(bool v) { _isLeeroyJenkinsRuntime = v; }
+	bool isSneakyRuntime() const { return _isSneakyRuntime; }
+	void setSneakyRuntime(bool v) { _isSneakyRuntime = v; }
 	/// Get the unit's aggression-flag
 	float getAggressiveness(std::string missionType) const;
 	/// Gets the spotter score. This is the number of turns sniper AI units can use spotting info from this unit.
