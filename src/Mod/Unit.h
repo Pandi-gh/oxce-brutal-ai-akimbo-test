@@ -471,6 +471,14 @@ private:
 	bool _capturable;
 	bool _canSurrender, _autoSurrender;
 	bool _isLeeroyJenkins, _isBrutal, _isCheatOnMovement, _isAggressive, _isNotBrutal;
+	/// pWWWa/test: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
+	/// default 50. Controls per-turn probabilities for runtime Leeroy/Sneaky
+	/// flag transitions on individual BattleUnits of this type. See
+	/// SavedBattleGame::updateMixedAggressionFlags() for the table.
+	/// 0   = always cower in cover, take ages to dare attacking, never all charge.
+	/// 50  = balanced (default if YAML omits the field).
+	/// 100 = every unit charges from turn 1, no sneaky/cover-seeking at all.
+	int _unitAggression = 50;
 	bool _waitIfOutsideWeaponRange;
 	int _aiTargetMode;
 	int _pickUpWeaponsMoreActively;
@@ -580,6 +588,8 @@ public:
 	bool isLeeroyJenkins() const { return _isLeeroyJenkins; };
 	/// Checks if the unit is aggressive
 	bool isAggressive() const { return _isAggressive; };
+	/// pWWWa/test: per-race aggression value for brutalAI=3 (Mixed) mode.
+	int getUnitAggression() const { return _unitAggression; };
 	/// Checks if the unit is using brutal-AI
 	bool isBrutal() const { return _isBrutal; };
 	/// Checks if the unit is not using brutal-AI even if brutal-AI is globally enabled
