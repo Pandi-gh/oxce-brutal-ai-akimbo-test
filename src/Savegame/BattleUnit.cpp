@@ -6462,15 +6462,19 @@ bool BattleUnit::isLeeroyJenkins() const
 	// flipped on by SavedBattleGame::updateMixedAggressionFlags() over the
 	// course of the mission, with probabilities driven by
 	// Unit::getUnitAggression().
-	// Applies to BOTH hostile (aliens, opt: brutalAI) and neutral (animals,
-	// cultists, etc., opt: brutalCivilians) factions, matching the existing
-	// per-faction Brutal options.
-	const bool dynMixed =
-		((_faction == FACTION_HOSTILE) && (Options::brutalAI       == 3)) ||
-		((_faction == FACTION_NEUTRAL) && (Options::brutalCivilians == 3));
+	//
+	// IMPORTANT: keep the same faction gating as the upstream brutalAI / 
+	// brutalCivilians == 2 lines below. Both options were originally written
+	// to apply to HOSTILE units (the comment "for neutral forces" is about
+	// the in-game LABEL "neutral forces" used for hostile wildlife/cultists,
+	// not the engine's UnitFaction::NEUTRAL enum). Switching to FACTION_NEUTRAL
+	// in dynMixed silently broke werewolf missions in our own builds — they
+	// are HOSTILE in YAML but get controlled by the brutalCivilians option.
+	const bool dynMixed = (_faction == FACTION_HOSTILE)
+		&& (Options::brutalAI == 3 || Options::brutalCivilians == 3);
 	return _isLeeroyJenkins
 		|| (_faction == FACTION_HOSTILE && Options::brutalAI       == 2)
-		|| (_faction == FACTION_NEUTRAL && Options::brutalCivilians == 2)
+		|| (_faction == FACTION_HOSTILE && Options::brutalCivilians == 2)
 		|| (dynMixed && _isLeeroyJenkinsRuntime);
 }
 
