@@ -115,12 +115,13 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	// units. With brutalAI/Civilians=3 (DynamicMixed) we want individual Brutal
 	// units to ALSO be able to sneak when SavedBattleGame::updateMixedAggressionFlags()
 	// has flipped their per-unit runtime Sneaky flag on. Either source enables
-	// the effect. Covers both hostile (aliens) and neutral (animals/cultists).
-	const UnitFaction f = unit->getFaction();
-	const bool dynMixed =
-		((f == FACTION_HOSTILE) && (Options::brutalAI       == 3)) ||
-		((f == FACTION_NEUTRAL) && (Options::brutalCivilians == 3));
-	bool sneak = (Options::sneakyAI && f == FACTION_HOSTILE && !unit->isBrutal())
+	// the effect.
+	// FACTION_HOSTILE gating mirrors upstream's brutalAI/brutalCivilians==2
+	// behaviour: both options apply to HOSTILE units (UI label "neutral forces"
+	// is about wildlife/cultists, not engine's UnitFaction::NEUTRAL).
+	const bool dynMixed = (unit->getFaction() == FACTION_HOSTILE)
+		&& (Options::brutalAI == 3 || Options::brutalCivilians == 3);
+	bool sneak = (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
 		|| (dynMixed && unit->isSneakyRuntime());
 
 	auto movementType = getMovementType(unit, missileTarget, bam);
