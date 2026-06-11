@@ -3775,27 +3775,24 @@ static const AggressionRow& aggrRowFor(int unitAggression)
 
 void SavedBattleGame::updateMixedAggressionFlags()
 {
-	// Snapshot: count current population and how many of them already hold
+	// Snapshot: current hostile population + how many of them already hold
 	// each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
-	// pWWWa/test: covers BOTH factions controlled by brutal-AI:
-	//   FACTION_HOSTILE  — aliens, gated by Options::brutalAI == 3
-	//   FACTION_NEUTRAL  — non-civilian beasts, cultists, hostile wildlife
-	//                       (rats, werewolves, ...), gated by Options::brutalCivilians == 3
-	// Each unit is included only if the appropriate option is on, otherwise it
-	// stays in the old behaviour (vanilla / Brutal / Seek&Destroy).
-	// Unconscious / stunned units ARE included on purpose — they may recover
-	// later this mission and should carry already-assigned flags. Only the
-	// dead are skipped.
+	// pWWWa/test: we apply the DynamicMixed logic to FACTION_HOSTILE only,
+	// because the upstream `brutalCivilians` option also gates HOSTILE units
+	// despite its name (the UI label "neutral forces" refers to hostile
+	// wildlife / cultists, NOT engine's UnitFaction::NEUTRAL). Switching to
+	// FACTION_NEUTRAL here silently broke werewolf missions where the units
+	// are flagged FACTION_HOSTILE in YAML.
+	// Either option ==3 enables the run — to mirror exactly how upstream's
+	// `isLeeroyJenkins() ... == 2` lines combine the two flags.
+	// Unconscious / stunned hostiles ARE included on purpose — they may wake
+	// up later in the mission and should carry already-assigned flags.
+	// Only dead units are skipped.
 	int hostileTotal = 0, leeroyCount = 0, sneakyCount = 0;
 	int hostileSkippedDead = 0;
-	const bool wantHostile = (Options::brutalAI       == 3);
-	const bool wantNeutral = (Options::brutalCivilians == 3);
 	for (auto* bu : _units)
 	{
-		const UnitFaction f = bu->getOriginalFaction();
-		if (f == FACTION_HOSTILE && !wantHostile) continue;
-		if (f == FACTION_NEUTRAL && !wantNeutral) continue;
-		if (f != FACTION_HOSTILE && f != FACTION_NEUTRAL) continue;
+		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
 		if (bu->getStatus() == STATUS_DEAD)
 		{
 			++hostileSkippedDead;
@@ -3832,11 +3829,8 @@ void SavedBattleGame::updateMixedAggressionFlags()
 
 	for (auto* bu : _units)
 	{
-		const UnitFaction f = bu->getOriginalFaction();
-		if (f == FACTION_HOSTILE && !wantHostile) continue;
-		if (f == FACTION_NEUTRAL && !wantNeutral) continue;
-		if (f != FACTION_HOSTILE && f != FACTION_NEUTRAL) continue;
-		// pWWWa/test: do NOT skip unconscious/stunned units — they may
+		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
+		// pWWWa/test: do NOT skip unconscious/stunned hostiles — they may
 		// recover later this mission and should carry already-assigned flags.
 		// Skip only the dead (no point rolling for a corpse).
 		if (bu->getStatus() == STATUS_DEAD)              continue;
