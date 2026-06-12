@@ -48,7 +48,7 @@
 #include "../Mod/RuleStartingCondition.h"
 #include "../Mod/RuleEnviroEffects.h"
 #include "../Mod/RuleItem.h"
-#include "../Mod/Unit.h" // pWWWa/test: for getUnitAggression() in brutalAI=3
+#include "../Mod/Unit.h" // Pandi: for getUnitAggression() in brutalAI=3
 #include "../Mod/RuleSoldier.h"
 #include "../Mod/RuleSoldierBonus.h"
 #include "../Mod/RuleWeaponSet.h"
@@ -68,7 +68,7 @@ SavedBattleGame::SavedBattleGame(Mod *rule, Language *lang, bool isPreview) :
 	_lastSelectedUnit(0), _pathfinding(0), _tileEngine(0),
 	_reinforcementsItemLevel(0), _startingCondition(nullptr), _enviroEffects(nullptr), _ecEnabledFriendly(false), _ecEnabledHostile(false), _ecEnabledNeutral(false),
 	_globalShade(0), _side(FACTION_PLAYER), _turn(0), _bughuntMinTurn(20), _animFrame(0), _nameDisplay(false),
-	_debugMode(false), _bughuntMode(false), _aborted(false), _itemId(0),
+	_debugMode(false), _bughuntMode(false), _mixedAggressionFlagsInitialized(false), _aborted(false), _itemId(0),
 	_vipEscapeType(ESCAPE_NONE), _vipSurvivalPercentage(0), _vipsSaved(0), _vipsLost(0), _vipsWaitingOutside(0), _vipsSavedScore(0), _vipsLostScore(0), _vipsWaitingOutsideScore(0),
 	_objectiveType(-1), _objectivesDestroyed(0), _objectivesNeeded(0),
 	_unitsFalling(false), _cheating(false), _tuReserved(BA_NONE), _kneelReserved(false), _depth(0),
@@ -171,6 +171,16 @@ void SavedBattleGame::load(const YAML::YamlNodeReader& node, Mod *mod, SavedGame
 	reader.tryRead("flattenedMapBlockNames", _flattenedMapBlockNames);
 	reader.tryRead("globalshade", _globalShade);
 	reader.tryRead("turn", _turn);
+	// Pandi: DynamicMixed saves whether the initial startLeeroy/startSneaky
+	// distribution has already been rolled. If the marker is missing, this is
+	// either a fresh/old pre-marker battle. For mid-mission old saves (_turn > 1)
+	// assume initial distribution is already conceptually consumed so low-aggr
+	// units can immediately use perTurnLeeroyPct instead of being stuck on
+	// startLeeroyPct=0.
+	if (!reader.tryRead("mixedAggressionFlagsInitialized", _mixedAggressionFlagsInitialized))
+	{
+		_mixedAggressionFlagsInitialized = (_turn > 1);
+	}
 	reader.tryRead("bughuntMinTurn", _bughuntMinTurn);
 	reader.tryRead("bughuntMode", _bughuntMode);
 	reader.tryRead("depth", _depth);
@@ -538,6 +548,9 @@ void SavedBattleGame::save(YAML::YamlNodeWriter writer) const
 	writer.write("flattenedMapBlockNames", _flattenedMapBlockNames);
 	writer.write("globalshade", _globalShade);
 	writer.write("turn", _turn);
+	// Pandi: persist DynamicMixed init state so per-turn deltas don't fall back
+	// to turn-1 chances after loading a save with no current Leeroy/Sneaky flags.
+	writer.write("mixedAggressionFlagsInitialized", _mixedAggressionFlagsInitialized);
 	writer.write("bughuntMinTurn", _bughuntMinTurn);
 	writer.write("animFrame", _animFrame);
 	writer.write("bughuntMode", _bughuntMode);
@@ -1507,7 +1520,7 @@ void SavedBattleGame::endTurn()
 		_undoUnit = nullptr;
 		_side = FACTION_HOSTILE;
 
-		// pWWWa/test: brutalAI=3 (Mixed) per-turn aggression update. Runs only
+		// Pandi: brutalAI=3 (Mixed) per-turn aggression update. Runs only
 		// at the player→hostile transition, exactly when hostile units are
 		// about to act. Per-unit Leeroy/Sneaky flags get probabilistically
 		// flipped according to the Unit::getUnitAggression() table.
@@ -3712,7 +3725,7 @@ std::string debugDisplayScript(const SavedBattleGame* p)
 } // namespace
 
 /**
- * pWWWa/test: brutalAI=3 (Mixed) — per-turn aggression flag update.
+ * Pandi: brutalAI=3 (Mixed) — per-turn aggression flag update.
  *
  * Each hostile unit gets two "sticky" runtime flags:
  *   _isLeeroyJenkinsRuntime — once true, the unit charges enemies (S&D mode).
@@ -3734,8 +3747,8 @@ std::string debugDisplayScript(const SavedBattleGame* p)
  * the faction falls to `minSneaky%`. (For maxLeeroy=100 / minSneaky=0 the
  * caps are simply never reached.)
  *
- * Table is indexed by `aggression/10` (0..10 inclusive, 11 rows). Source for
- * the numbers: user-provided spreadsheet 2026-06-10.
+ * Pandi: Table is indexed by `unitAggression/10` (0..10 inclusive, 11 rows).
+ * Source for the numbers: user-provided spreadsheet 2026-06-10.
  */
 namespace
 {
@@ -3777,7 +3790,7 @@ void SavedBattleGame::updateMixedAggressionFlags()
 {
 	// Snapshot: current hostile population + how many of them already hold
 	// each runtime flag. Needed to enforce the maxLeeroy / minSneaky caps.
-	// pWWWa/test: we apply the DynamicMixed logic to FACTION_HOSTILE only,
+	// Pandi: we apply the DynamicMixed logic to FACTION_HOSTILE only,
 	// because the upstream `brutalCivilians` option also gates HOSTILE units
 	// despite its name (the UI label "neutral forces" refers to hostile
 	// wildlife / cultists, NOT engine's UnitFaction::NEUTRAL). Switching to
@@ -3803,7 +3816,7 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		if (bu->isSneakyRuntime())        ++sneakyCount;
 	}
 
-	// pWWWa/test: entry log so it's obvious whether the function is being
+	// Pandi: entry log so it's obvious whether the function is being
 	// called at all. Useful when the map only has unconscious/dead hostiles
 	// and the for-loop below produces no per-unit log lines.
 	Log(LOG_INFO) << "[AGGR] updateMixedAggressionFlags ENTER"
@@ -3815,22 +3828,18 @@ void SavedBattleGame::updateMixedAggressionFlags()
 
 	if (hostileTotal == 0) return;
 
-	// pWWWa/test: two independent init triggers for the two flags. Sneaky and
-	// Leeroy are rolled independently in the body, so let each one decide on
-	// its own whether the "starting %" roll still needs to happen.
-	//   * isLeeroyInit — first hostile turn of fresh mission, or no unit has
-	//     a runtime Leeroy yet (e.g. upgraded binary mid-mission).
-	//   * isSneakyInit — same, but for Sneaky. Crucially this stays true even
-	//     after Leeroy flags have been distributed for several turns.
-	const bool isLeeroyInit = (_turn <= 1) || (leeroyCount == 0);
-	const bool isSneakyInit = (_turn <= 1) || (sneakyCount == 0);
-	// kept as compatibility name for the per-Leeroy "init" log tag below
-	const bool isTurnOne    = isLeeroyInit;
+	// Pandi: initialization is now controlled by a saved battle-level marker,
+	// not by current leeroy/sneaky counts. The old `leeroyCount == 0` heuristic
+	// made low-aggression missions repeat startLeeroyPct forever; for example
+	// unitAggression=0 has startLeeroy=0 and perTurnLeeroy=2, so Leeroy could
+	// never appear if the count stayed zero.
+	const bool initialMixedRoll = !_mixedAggressionFlagsInitialized;
+	const bool isTurnOne = initialMixedRoll; // kept for existing Leeroy log wording.
 
 	for (auto* bu : _units)
 	{
 		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
-		// pWWWa/test: do NOT skip unconscious/stunned hostiles — they may
+		// Pandi: do NOT skip unconscious/stunned hostiles — they may
 		// recover later this mission and should carry already-assigned flags.
 		// Skip only the dead (no point rolling for a corpse).
 		if (bu->getStatus() == STATUS_DEAD)              continue;
@@ -3850,7 +3859,7 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		{
 			const int currentLeeroyPct = (leeroyCount * 100) / hostileTotal;
 			const bool underCap = currentLeeroyPct < row.maxLeeroyPct;
-			const int chance = isTurnOne ? row.startLeeroyPct : row.perTurnLeeroyPct;
+			const int chance = initialMixedRoll ? row.startLeeroyPct : row.perTurnLeeroyPct;
 			if (underCap && chance > 0)
 			{
 				const int roll = RNG::generate(0, 99);
@@ -3873,11 +3882,10 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		}
 
 		// --- Sneaky flag ---
-		// pWWWa/test: uses its OWN init detector (isSneakyInit) so a save
-		// that already saw Leeroy distribution but never had Sneaky rolled
-		// (e.g. upgrade from a binary that didn't ship Sneaky-runtime) still
-		// gets the starting % treatment on the next hostile turn.
-		if (isSneakyInit)
+		// Pandi: Sneaky uses the same saved initialization marker as Leeroy.
+		// This keeps startSneakyPct a true one-shot initial distribution; after
+		// that, only perTurnLoseSneakyPct/minSneakyPct control Sneaky decay.
+		if (initialMixedRoll)
 		{
 			// Independent roll for the Sneaky starting flag.
 			if (!bu->isSneakyRuntime() && row.startSneakyPct > 0)
@@ -3920,6 +3928,16 @@ void SavedBattleGame::updateMixedAggressionFlags()
 				}
 			}
 		}
+	}
+
+	// Pandi: mark the one-shot DynamicMixed start distribution as consumed only
+	// after a non-empty hostile roster has been processed. This is saved with
+	// the battle, so loading a mission with zero current Leeroy/Sneaky flags will
+	// still proceed to per-turn deltas instead of repeating start chances forever.
+	if (initialMixedRoll)
+	{
+		_mixedAggressionFlagsInitialized = true;
+		Log(LOG_INFO) << "[AGGR] DynamicMixed initial distribution consumed";
 	}
 }
 
