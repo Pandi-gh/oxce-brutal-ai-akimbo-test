@@ -101,6 +101,10 @@ private:
 	int _animFrame;
 	bool _nameDisplay;
 	bool _debugMode, _bughuntMode;
+	// Pandi: DynamicMixed initialization marker for brutalAI=3.
+	// False for fresh/old battles until the initial startLeeroy/startSneaky
+	// distribution has been rolled exactly once; then per-turn deltas are used.
+	bool _mixedAggressionFlagsInitialized;
 	bool _aborted;
 	bool _baseCraftInventory = false;
 	int _itemId;
@@ -416,11 +420,12 @@ public:
 	const RuleCraftDeployment& getCustomDeployment(const RuleCraft* rule) const;
 	/// Ends the turn.
 	void endTurn();
-	/// pWWWa/test: brutalAI=3 (Mixed) per-turn aggression update. Walks all
-	/// hostile units once per hostile turn and probabilistically sets the
-	/// runtime Leeroy / removes the runtime Sneaky flag, based on a table
-	/// indexed by Unit::getUnitAggression() (0..100). Sticky: once a unit
-	/// gets Leeroy it keeps it; once it loses Sneaky it stays non-Sneaky.
+	/// Pandi: brutalAI=3 (DynamicMixed) per-turn aggression update. Walks all
+	/// hostile units once per hostile turn and probabilistically sets runtime
+	/// Leeroy/Sneaky flags based on Unit::getUnitAggression() (0..100).
+	/// Initial startLeeroy/startSneaky rolls are gated by
+	/// _mixedAggressionFlagsInitialized so that "no Leeroy yet" does not
+	/// accidentally repeat turn-1 logic forever.
 	void updateMixedAggressionFlags();
 	/// Gets animation frame.
 	int getAnimFrame() const;
