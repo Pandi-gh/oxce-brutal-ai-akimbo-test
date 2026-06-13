@@ -393,12 +393,13 @@ void OptionsAdvancedState::lstOptionsClick(Action *action)
 		}
 		else if (i == &Options::brutalAI || i == &Options::brutalCivilians)
 		{
-			// pWWWa/test: 3 = "Mixed" (Brutal-base, with per-unit aggression
-			// table that gradually flips some units from cover-seeker (Sneaky)
-			// to chase-down (Leeroy) over the course of the mission). 0..2
-			// keep their classic meaning (0=vanilla, 1=Brutal, 2=Seek&Destroy).
-			min = 0;
-			max = 3;
+				// Pandi: 3 = "Mixed" (Brutal-base, with per-unit aggression
+				// table that gradually flips some units from cover-seeker (Sneaky)
+				// to chase-down (Leeroy) over the course of the mission). 0..2
+				// keep their classic meaning (0=vanilla, 1=Brutal, 2=Seek&Destroy).
+				// Pandi: 4 = DynamicTraits, separate mode-4 trait layer over Brutal AI.
+				min = 0;
+				max = 4;
 		}
 		else if (i == &Options::battleExplosionHeight)
 		{
@@ -474,7 +475,7 @@ void OptionsAdvancedState::lstOptionsClick(Action *action)
 			max = 100;
 		}
 		else if (i == &Options::oxceWoundedAttackMissionIf) {
-			// pWWWa/test: 70-100, step 5. 100 = vanilla (full health only),
+			// Pandi: 70-100, step 5. 100 = vanilla (full health only),
 			// 70 = most permissive setting requested.
 			min = 70;
 			max = 100;
