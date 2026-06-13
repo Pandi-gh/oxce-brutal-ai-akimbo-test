@@ -68,7 +68,7 @@ SavedBattleGame::SavedBattleGame(Mod *rule, Language *lang, bool isPreview) :
 	_lastSelectedUnit(0), _pathfinding(0), _tileEngine(0),
 	_reinforcementsItemLevel(0), _startingCondition(nullptr), _enviroEffects(nullptr), _ecEnabledFriendly(false), _ecEnabledHostile(false), _ecEnabledNeutral(false),
 	_globalShade(0), _side(FACTION_PLAYER), _turn(0), _bughuntMinTurn(20), _animFrame(0), _nameDisplay(false),
-	_debugMode(false), _bughuntMode(false), _mixedAggressionFlagsInitialized(false), _aborted(false), _itemId(0),
+	_debugMode(false), _bughuntMode(false), _mixedAggressionFlagsInitialized(false), _mixedAggressionMigrationTurns(0), _aborted(false), _itemId(0),
 	_vipEscapeType(ESCAPE_NONE), _vipSurvivalPercentage(0), _vipsSaved(0), _vipsLost(0), _vipsWaitingOutside(0), _vipsSavedScore(0), _vipsLostScore(0), _vipsWaitingOutsideScore(0),
 	_objectiveType(-1), _objectivesDestroyed(0), _objectivesNeeded(0),
 	_unitsFalling(false), _cheating(false), _tuReserved(BA_NONE), _kneelReserved(false), _depth(0),
@@ -173,13 +173,17 @@ void SavedBattleGame::load(const YAML::YamlNodeReader& node, Mod *mod, SavedGame
 	reader.tryRead("turn", _turn);
 	// Pandi: DynamicMixed saves whether the initial startLeeroy/startSneaky
 	// distribution has already been rolled. If the marker is missing, this is
-	// either a fresh/old pre-marker battle. For mid-mission old saves (_turn > 1)
-	// assume initial distribution is already conceptually consumed so low-aggr
-	// units can immediately use perTurnLeeroyPct instead of being stuck on
-	// startLeeroyPct=0.
+	// an old pre-marker battle. Keep initialized=false so the next hostile turn
+	// performs exactly one initial/migration roll; for mid-mission old saves,
+	// also remember how many hostile turns should be approximated as catch-up.
 	if (!reader.tryRead("mixedAggressionFlagsInitialized", _mixedAggressionFlagsInitialized))
 	{
-		_mixedAggressionFlagsInitialized = (_turn > 1);
+		_mixedAggressionFlagsInitialized = false;
+		_mixedAggressionMigrationTurns = std::max(0, _turn - 1);
+	}
+	else
+	{
+		reader.tryRead("mixedAggressionMigrationTurns", _mixedAggressionMigrationTurns);
 	}
 	reader.tryRead("bughuntMinTurn", _bughuntMinTurn);
 	reader.tryRead("bughuntMode", _bughuntMode);
@@ -551,6 +555,7 @@ void SavedBattleGame::save(YAML::YamlNodeWriter writer) const
 	// Pandi: persist DynamicMixed init state so per-turn deltas don't fall back
 	// to turn-1 chances after loading a save with no current Leeroy/Sneaky flags.
 	writer.write("mixedAggressionFlagsInitialized", _mixedAggressionFlagsInitialized);
+	writer.write("mixedAggressionMigrationTurns", _mixedAggressionMigrationTurns);
 	writer.write("bughuntMinTurn", _bughuntMinTurn);
 	writer.write("animFrame", _animFrame);
 	writer.write("bughuntMode", _bughuntMode);
@@ -3784,6 +3789,38 @@ static const AggressionRow& aggrRowFor(int unitAggression)
 	if (idx > 10) idx = 10;
 	return kAggrTable[idx];
 }
+
+// Pandi: old-save migration helper. Probability after one initial roll and
+// `elapsedTurns` subsequent per-turn rolls: 1 - missStart * missPerTurn^N.
+static int migratedLeeroyChance(int startPct, int perTurnPct, int elapsedTurns)
+{
+	double miss = (100 - startPct) / 100.0;
+	for (int i = 0; i < elapsedTurns; ++i)
+	{
+		miss *= (100 - perTurnPct) / 100.0;
+	}
+	int chance = static_cast<int>(100.0 * (1.0 - miss) + 0.5);
+	if (chance < 0) chance = 0;
+	if (chance > 100) chance = 100;
+	return chance;
+}
+
+// Pandi: old-save migration helper for Sneaky. Approximate current Sneaky
+// chance after initial startSneakyPct and elapsed decay rolls, respecting the
+// table's minSneaky floor as a population-level target approximation.
+static int migratedSneakyChance(int startPct, int losePct, int minPct, int elapsedTurns)
+{
+	double chanceD = startPct;
+	for (int i = 0; i < elapsedTurns; ++i)
+	{
+		chanceD *= (100 - losePct) / 100.0;
+	}
+	int chance = static_cast<int>(chanceD + 0.5);
+	if (chance < minPct) chance = minPct;
+	if (chance < 0) chance = 0;
+	if (chance > 100) chance = 100;
+	return chance;
+}
 } // anonymous namespace
 
 void SavedBattleGame::updateMixedAggressionFlags()
@@ -3828,13 +3865,27 @@ void SavedBattleGame::updateMixedAggressionFlags()
 
 	if (hostileTotal == 0) return;
 
-	// Pandi: initialization is now controlled by a saved battle-level marker,
-	// not by current leeroy/sneaky counts. The old `leeroyCount == 0` heuristic
-	// made low-aggression missions repeat startLeeroyPct forever; for example
+	// Pandi: initialization is controlled by a saved battle-level marker, not by
+	// current leeroy/sneaky counts. The old `leeroyCount == 0` heuristic made
+	// low-aggression missions repeat startLeeroyPct forever; for example
 	// unitAggression=0 has startLeeroy=0 and perTurnLeeroy=2, so Leeroy could
 	// never appear if the count stayed zero.
-	const bool initialMixedRoll = !_mixedAggressionFlagsInitialized;
-	const bool isTurnOne = initialMixedRoll; // kept for existing Leeroy log wording.
+	// Pandi: recovery for saves produced by the first broken marker patch: they
+	// may have mixedAggressionFlagsInitialized=true but zero runtime flags. Treat
+	// such a mid-mission all-zero state as needing one catch-up migration.
+	const bool allRuntimeFlagsMissing = (_turn > 1 && leeroyCount == 0 && sneakyCount == 0);
+	const bool recoveryMigrationRoll = _mixedAggressionFlagsInitialized && _mixedAggressionMigrationTurns == 0 && allRuntimeFlagsMissing;
+	if (recoveryMigrationRoll)
+	{
+		_mixedAggressionMigrationTurns = std::max(0, _turn - 1);
+		Log(LOG_INFO) << "[AGGR] Pandi recovery: initialized marker was set but no runtime flags exist; scheduling migrationTurns=" << _mixedAggressionMigrationTurns;
+	}
+	const bool initialMixedRoll = !_mixedAggressionFlagsInitialized || recoveryMigrationRoll;
+	const bool migrationRoll = initialMixedRoll && _mixedAggressionMigrationTurns > 0;
+	const char* rollLabel = migrationRoll ? " migrate:" : (initialMixedRoll ? " init:" : " step:");
+	int leeroyAdded = 0;
+	int sneakyAdded = 0;
+	int sneakyLost = 0;
 
 	for (auto* bu : _units)
 	{
@@ -3859,7 +3910,9 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		{
 			const int currentLeeroyPct = (leeroyCount * 100) / hostileTotal;
 			const bool underCap = currentLeeroyPct < row.maxLeeroyPct;
-			const int chance = initialMixedRoll ? row.startLeeroyPct : row.perTurnLeeroyPct;
+			const int chance = migrationRoll
+				? migratedLeeroyChance(row.startLeeroyPct, row.perTurnLeeroyPct, _mixedAggressionMigrationTurns)
+				: (initialMixedRoll ? row.startLeeroyPct : row.perTurnLeeroyPct);
 			if (underCap && chance > 0)
 			{
 				const int roll = RNG::generate(0, 99);
@@ -3867,8 +3920,9 @@ void SavedBattleGame::updateMixedAggressionFlags()
 				{
 					bu->setLeeroyJenkinsRuntime(true);
 					++leeroyCount;
+					++leeroyAdded;
 					Log(LOG_INFO) << "[AGGR] turn=" << _turn
-						<< (isTurnOne ? " init:" : " step:")
+						<< rollLabel
 						<< " unit=" << bu->getId()
 						<< " type=" << bu->getType()
 						<< " unitAggression=" << aggr
@@ -3887,19 +3941,23 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		// that, only perTurnLoseSneakyPct/minSneakyPct control Sneaky decay.
 		if (initialMixedRoll)
 		{
-			// Independent roll for the Sneaky starting flag.
-			if (!bu->isSneakyRuntime() && row.startSneakyPct > 0)
+			// Independent roll for the Sneaky starting/migration flag.
+			const int sneakyChance = migrationRoll
+				? migratedSneakyChance(row.startSneakyPct, row.perTurnLoseSneakyPct, row.minSneakyPct, _mixedAggressionMigrationTurns)
+				: row.startSneakyPct;
+			if (!bu->isSneakyRuntime() && sneakyChance > 0)
 			{
 				const int roll = RNG::generate(0, 99);
-				if (roll < row.startSneakyPct)
+				if (roll < sneakyChance)
 				{
 					bu->setSneakyRuntime(true);
 					++sneakyCount;
-					Log(LOG_INFO) << "[AGGR] turn=" << _turn << " init:"
+					++sneakyAdded;
+					Log(LOG_INFO) << "[AGGR] turn=" << _turn << rollLabel
 						<< " unit=" << bu->getId()
 						<< " type=" << bu->getType()
 						<< " unitAggression=" << aggr
-						<< " startSneaky=" << row.startSneakyPct
+						<< " sneakyChance=" << sneakyChance
 						<< "% roll=" << roll
 						<< " => SNEAKY ON";
 				}
@@ -3916,6 +3974,7 @@ void SavedBattleGame::updateMixedAggressionFlags()
 				{
 					bu->setSneakyRuntime(false);
 					--sneakyCount;
+					++sneakyLost;
 					Log(LOG_INFO) << "[AGGR] turn=" << _turn << " step:"
 						<< " unit=" << bu->getId()
 						<< " type=" << bu->getType()
@@ -3930,14 +3989,24 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		}
 	}
 
-	// Pandi: mark the one-shot DynamicMixed start distribution as consumed only
-	// after a non-empty hostile roster has been processed. This is saved with
-	// the battle, so loading a mission with zero current Leeroy/Sneaky flags will
-	// still proceed to per-turn deltas instead of repeating start chances forever.
+	// Pandi: always log an exit summary, including turns with zero successful
+	// flips, so "nothing happened" can be distinguished from "function didn't run".
+	Log(LOG_INFO) << "[AGGR] updateMixedAggressionFlags EXIT"
+		<< " mode=" << (migrationRoll ? "migration" : (initialMixedRoll ? "initial" : "step"))
+		<< " migrationTurns=" << _mixedAggressionMigrationTurns
+		<< " addedLeeroy=" << leeroyAdded
+		<< " addedSneaky=" << sneakyAdded
+		<< " lostSneaky=" << sneakyLost
+		<< " finalLeeroy=" << leeroyCount
+		<< " finalSneaky=" << sneakyCount;
+
+	// Pandi: mark the one-shot DynamicMixed start/migration distribution as
+	// consumed only after a non-empty hostile roster has been processed.
 	if (initialMixedRoll)
 	{
 		_mixedAggressionFlagsInitialized = true;
-		Log(LOG_INFO) << "[AGGR] DynamicMixed initial distribution consumed";
+		_mixedAggressionMigrationTurns = 0;
+		Log(LOG_INFO) << "[AGGR] DynamicMixed initial/migration distribution consumed";
 	}
 }
 
