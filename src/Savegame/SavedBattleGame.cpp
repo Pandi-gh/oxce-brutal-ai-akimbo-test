@@ -4028,7 +4028,7 @@ struct DynamicTraitCoeff
 	int intelligenceCoeff;
 };
 
-static constexpr DynamicTraitCoeff kLeeroyTrait     = { "LEEROY",     100, -20 };
+static constexpr DynamicTraitCoeff kLeeroyTrait     = { "LEEROY",     100, -80 };
 static constexpr DynamicTraitCoeff kSneakyTrait     = { "SNEAKY",     -30, 100 };
 static constexpr DynamicTraitCoeff kCautiousTrait   = { "CAUTIOUS",   -20, 100 };
 static constexpr DynamicTraitCoeff kFlankerTrait    = { "FLANKER",     30,  70 };
@@ -4042,24 +4042,24 @@ static int clampPercentPandi(int v)
 }
 
 // Pandi: chance formula requested for DynamicTraits:
-// ((50 + Aggression * AggressionCoeff) / 10 +
-//  (50 + Intelligence * IntelligenceCoeff) / 10) / 2
+// ((30 + Aggression * AggressionCoeff) / 10 +
+//  (30 + Intelligence * IntelligenceCoeff) / 10) / 3
 static int dynamicTraitChancePandi(const BattleUnit* bu, const DynamicTraitCoeff& trait)
 {
 	const int aggression = bu->getAggression();
 	const int intelligence = bu->getIntelligence();
-	const double aggrPart = (50.0 + aggression * trait.aggressionCoeff) / 10.0;
-	const double intelPart = (50.0 + intelligence * trait.intelligenceCoeff) / 10.0;
-	const int chance = static_cast<int>(((aggrPart + intelPart) / 2.0) + 0.5);
+	const double aggrPart = (30.0 + aggression * trait.aggressionCoeff) / 10.0;
+	const double intelPart = (30.0 + intelligence * trait.intelligenceCoeff) / 10.0;
+	const int chance = static_cast<int>(((aggrPart + intelPart) / 3.0) + 0.5);
 	return clampPercentPandi(chance);
 }
 
-// Pandi: duration formula requested for DynamicTraits: (100 - Chance) / 10.
-// Minimum 1 turn after a successful roll, otherwise chance=100 would create a
-// flag that immediately expires without affecting behavior.
+// Pandi: duration formula requested for DynamicTraits:
+// ((40 - Chance) / 6) * RND(1.0..1.5).
 static int dynamicTraitDurationPandi(int chance)
 {
-	int duration = (100 - chance) / 10;
+	const double randomMultiplier = RNG::generate(100, 150) / 100.0;
+	int duration = static_cast<int>((((40.0 - chance) / 6.0) * randomMultiplier) + 0.5);
 	if (duration < 1) duration = 1;
 	return duration;
 }
@@ -4084,6 +4084,25 @@ void SavedBattleGame::updateDynamicTraitFlags()
 		bu->tickDynamicTraitRuntimeTurns();
 
 		const Unit* ur = bu->getUnitRules();
+		// Pandi: ruleset/mini-patch controls are checked live here as well, so
+		// tests on loaded saves can disable rolling with `isX: false` or force a
+		// trait with `isX: true` without needing newly spawned BattleUnits.
+		const bool rulesetLeeroyPermanent = ur && ur->isLeeroyJenkins();
+		const bool rulesetLeeroyDisabled = (ur && ur->isLeeroyJenkinsDisabled()) || bu->isLeeroyJenkinsRuntimeDisabled();
+		const bool rulesetSneakyPermanent = (ur && ur->isSneaky()) || bu->hasPermanentSneaky();
+		const bool rulesetSneakyDisabled = (ur && ur->isSneakyDisabled()) || bu->isSneakyRuntimeDisabled();
+		const bool rulesetCautiousPermanent = (ur && ur->isCautious()) || bu->hasPermanentCautious();
+		const bool rulesetCautiousDisabled = (ur && ur->isCautiousDisabled()) || bu->isCautiousRuntimeDisabled();
+		const bool rulesetFlankerPermanent = (ur && ur->isFlanker()) || bu->hasPermanentFlanker();
+		const bool rulesetFlankerDisabled = (ur && ur->isFlankerDisabled()) || bu->isFlankerRuntimeDisabled();
+		const bool rulesetSuppressorPermanent = (ur && ur->isSuppressor()) || bu->hasPermanentSuppressor();
+		const bool rulesetSuppressorDisabled = (ur && ur->isSuppressorDisabled()) || bu->isSuppressorRuntimeDisabled();
+
+		if (rulesetLeeroyDisabled) bu->setLeeroyJenkinsRuntimeTurns(0); else if (rulesetLeeroyPermanent) bu->setLeeroyJenkinsRuntimeTurns(9999);
+		if (rulesetSneakyDisabled) bu->setSneakyRuntimeTurns(0); else if (rulesetSneakyPermanent) bu->setSneakyRuntimeTurns(9999);
+		if (rulesetCautiousDisabled) bu->setCautiousRuntimeTurns(0); else if (rulesetCautiousPermanent) bu->setCautiousRuntimeTurns(9999);
+		if (rulesetFlankerDisabled) bu->setFlankerRuntimeTurns(0); else if (rulesetFlankerPermanent) bu->setFlankerRuntimeTurns(9999);
+		if (rulesetSuppressorDisabled) bu->setSuppressorRuntimeTurns(0); else if (rulesetSuppressorPermanent) bu->setSuppressorRuntimeTurns(9999);
 
 		enum DynamicTraitIdPandi
 		{
@@ -4094,9 +4113,9 @@ void SavedBattleGame::updateDynamicTraitFlags()
 			TRAIT_SUPPRESSOR
 		};
 
-		auto rollTrait = [&](const DynamicTraitCoeff& trait, bool permanent, bool active, DynamicTraitIdPandi traitId)
+		auto rollTrait = [&](const DynamicTraitCoeff& trait, bool permanent, bool disabled, bool active, DynamicTraitIdPandi traitId)
 		{
-			if (permanent || active)
+			if (permanent || disabled || active)
 			{
 				return;
 			}
@@ -4135,27 +4154,32 @@ void SavedBattleGame::updateDynamicTraitFlags()
 		// Pandi: permanent ruleset flags suppress runtime rolling for the same
 		// trait. Leeroy already had an old permanent ruleset flag.
 		rollTrait(kLeeroyTrait,
-			ur && ur->isLeeroyJenkins(),
+			rulesetLeeroyPermanent,
+			rulesetLeeroyDisabled,
 			bu->getLeeroyJenkinsRuntimeTurns() > 0,
 			TRAIT_LEEROY);
 
 		rollTrait(kSneakyTrait,
-			bu->hasPermanentSneaky(),
+			rulesetSneakyPermanent,
+			rulesetSneakyDisabled,
 			bu->getSneakyRuntimeTurns() > 0,
 			TRAIT_SNEAKY);
 
 		rollTrait(kCautiousTrait,
-			bu->hasPermanentCautious(),
+			rulesetCautiousPermanent,
+			rulesetCautiousDisabled,
 			bu->getCautiousRuntimeTurns() > 0,
 			TRAIT_CAUTIOUS);
 
 		rollTrait(kFlankerTrait,
-			bu->hasPermanentFlanker(),
+			rulesetFlankerPermanent,
+			rulesetFlankerDisabled,
 			bu->getFlankerRuntimeTurns() > 0,
 			TRAIT_FLANKER);
 
 		rollTrait(kSuppressorTrait,
-			bu->hasPermanentSuppressor(),
+			rulesetSuppressorPermanent,
+			rulesetSuppressorDisabled,
 			bu->getSuppressorRuntimeTurns() > 0,
 			TRAIT_SUPPRESSOR);
 	}
