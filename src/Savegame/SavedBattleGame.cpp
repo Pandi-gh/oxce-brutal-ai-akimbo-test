@@ -1533,6 +1533,12 @@ void SavedBattleGame::endTurn()
 		{
 			updateMixedAggressionFlags();
 		}
+		// Pandi: DynamicTraits is mode 4 and intentionally does not reuse or
+		// modify the mode-3 DynamicMixed table logic.
+		if (Options::brutalAI == 4 || Options::brutalCivilians == 4)
+		{
+			updateDynamicTraitFlags();
+		}
 	}
 	else if (_side == FACTION_HOSTILE)
 	{
@@ -4008,6 +4014,156 @@ void SavedBattleGame::updateMixedAggressionFlags()
 		_mixedAggressionMigrationTurns = 0;
 		Log(LOG_INFO) << "[AGGR] DynamicMixed initial/migration distribution consumed";
 	}
+}
+
+
+namespace
+{
+// Pandi: DynamicTraits coefficient profile. Coefficients intentionally use the
+// same visible names as runtime flags to make balancing from logs easier.
+struct DynamicTraitCoeff
+{
+	const char* name;
+	int aggressionCoeff;
+	int intelligenceCoeff;
+};
+
+static constexpr DynamicTraitCoeff kLeeroyTrait     = { "LEEROY",     100, -20 };
+static constexpr DynamicTraitCoeff kSneakyTrait     = { "SNEAKY",     -30, 100 };
+static constexpr DynamicTraitCoeff kCautiousTrait   = { "CAUTIOUS",   -20, 100 };
+static constexpr DynamicTraitCoeff kFlankerTrait    = { "FLANKER",     30,  70 };
+static constexpr DynamicTraitCoeff kSuppressorTrait = { "SUPPRESSOR",  70,  30 };
+
+static int clampPercentPandi(int v)
+{
+	if (v < 0) return 0;
+	if (v > 100) return 100;
+	return v;
+}
+
+// Pandi: chance formula requested for DynamicTraits:
+// ((50 + Aggression * AggressionCoeff) / 10 +
+//  (50 + Intelligence * IntelligenceCoeff) / 10) / 2
+static int dynamicTraitChancePandi(const BattleUnit* bu, const DynamicTraitCoeff& trait)
+{
+	const int aggression = bu->getAggression();
+	const int intelligence = bu->getIntelligence();
+	const double aggrPart = (50.0 + aggression * trait.aggressionCoeff) / 10.0;
+	const double intelPart = (50.0 + intelligence * trait.intelligenceCoeff) / 10.0;
+	const int chance = static_cast<int>(((aggrPart + intelPart) / 2.0) + 0.5);
+	return clampPercentPandi(chance);
+}
+
+// Pandi: duration formula requested for DynamicTraits: (100 - Chance) / 10.
+// Minimum 1 turn after a successful roll, otherwise chance=100 would create a
+// flag that immediately expires without affecting behavior.
+static int dynamicTraitDurationPandi(int chance)
+{
+	int duration = (100 - chance) / 10;
+	if (duration < 1) duration = 1;
+	return duration;
+}
+} // anonymous namespace
+
+void SavedBattleGame::updateDynamicTraitFlags()
+{
+	int hostileTotal = 0;
+	int rolls = 0;
+	int activations = 0;
+
+	Log(LOG_INFO) << "[TRAIT] updateDynamicTraitFlags ENTER turn=" << _turn;
+
+	for (auto* bu : _units)
+	{
+		if (bu->getOriginalFaction() != FACTION_HOSTILE) continue;
+		if (bu->getStatus() == STATUS_DEAD) continue;
+		++hostileTotal;
+
+		// Pandi: mode-4 traits are temporary, so tick existing durations once per
+		// hostile turn before rolling new inactive traits.
+		bu->tickDynamicTraitRuntimeTurns();
+
+		const Unit* ur = bu->getUnitRules();
+
+		enum DynamicTraitIdPandi
+		{
+			TRAIT_LEEROY,
+			TRAIT_SNEAKY,
+			TRAIT_CAUTIOUS,
+			TRAIT_FLANKER,
+			TRAIT_SUPPRESSOR
+		};
+
+		auto rollTrait = [&](const DynamicTraitCoeff& trait, bool permanent, bool active, DynamicTraitIdPandi traitId)
+		{
+			if (permanent || active)
+			{
+				return;
+			}
+			const int chance = dynamicTraitChancePandi(bu, trait);
+			if (chance <= 0)
+			{
+				return;
+			}
+			++rolls;
+			const int roll = RNG::generate(0, 99);
+			if (roll < chance)
+			{
+				const int duration = dynamicTraitDurationPandi(chance);
+				switch (traitId)
+				{
+				case TRAIT_LEEROY:     bu->setLeeroyJenkinsRuntimeTurns(duration); break;
+				case TRAIT_SNEAKY:     bu->setSneakyRuntimeTurns(duration); break;
+				case TRAIT_CAUTIOUS:   bu->setCautiousRuntimeTurns(duration); break;
+				case TRAIT_FLANKER:    bu->setFlankerRuntimeTurns(duration); break;
+				case TRAIT_SUPPRESSOR: bu->setSuppressorRuntimeTurns(duration); break;
+				}
+				++activations;
+				Log(LOG_INFO) << "[TRAIT] turn=" << _turn
+					<< " unit=" << bu->getId()
+					<< " type=" << bu->getType()
+					<< " trait=" << trait.name
+					<< " aggression=" << bu->getAggression()
+					<< " intelligence=" << bu->getIntelligence()
+					<< " chance=" << chance
+					<< "% roll=" << roll
+					<< " duration=" << duration
+					<< " => ON";
+			}
+		};
+
+		// Pandi: permanent ruleset flags suppress runtime rolling for the same
+		// trait. Leeroy already had an old permanent ruleset flag.
+		rollTrait(kLeeroyTrait,
+			ur && ur->isLeeroyJenkins(),
+			bu->getLeeroyJenkinsRuntimeTurns() > 0,
+			TRAIT_LEEROY);
+
+		rollTrait(kSneakyTrait,
+			bu->hasPermanentSneaky(),
+			bu->getSneakyRuntimeTurns() > 0,
+			TRAIT_SNEAKY);
+
+		rollTrait(kCautiousTrait,
+			bu->hasPermanentCautious(),
+			bu->getCautiousRuntimeTurns() > 0,
+			TRAIT_CAUTIOUS);
+
+		rollTrait(kFlankerTrait,
+			bu->hasPermanentFlanker(),
+			bu->getFlankerRuntimeTurns() > 0,
+			TRAIT_FLANKER);
+
+		rollTrait(kSuppressorTrait,
+			bu->hasPermanentSuppressor(),
+			bu->getSuppressorRuntimeTurns() > 0,
+			TRAIT_SUPPRESSOR);
+	}
+
+	Log(LOG_INFO) << "[TRAIT] updateDynamicTraitFlags EXIT"
+		<< " hostilesAlive=" << hostileTotal
+		<< " rolls=" << rolls
+		<< " activations=" << activations;
 }
 
 
