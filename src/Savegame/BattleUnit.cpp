@@ -458,6 +458,11 @@ BattleUnit::BattleUnit(const Mod *mod, const Unit *unit, UnitFaction faction, in
 	_spawnUnit = unit->getSpawnUnit();
 	_capturable = unit->getCapturable();
 	_isLeeroyJenkins = unit->isLeeroyJenkins();
+	// Pandi: permanent DynamicTraits flags copied from ruleset/mini-patch.
+	_isSneaky = unit->isSneaky();
+	_isCautious = unit->isCautious();
+	_isFlanker = unit->isFlanker();
+	_isSuppressor = unit->isSuppressor();
 	_isAggressive = unit->isAggressive();
 	if (unit->getPickUpWeaponsMoreActively() != -1)
 	{
@@ -751,11 +756,17 @@ void BattleUnit::load(const YAML::YamlNodeReader& node, const Mod *mod, const Sc
 
 	reader.tryRead("hasPanickedLastTurn", _hasPanickedLastTurn);
 
-	// pWWWa/test: brutalAI=3 (Mixed) runtime flags. Default false ⇒ old saves
+	// Pandi: brutalAI=3 (Mixed) runtime flags. Default false ⇒ old saves
 	// just have no value here, the unit gets re-rolled by
 	// SavedBattleGame::updateMixedAggressionFlags() on the next hostile turn.
 	reader.tryRead("leeroyJenkinsRuntime", _isLeeroyJenkinsRuntime);
 	reader.tryRead("sneakyRuntime",        _isSneakyRuntime);
+	// Pandi: brutalAI=4 (DynamicTraits) duration-based runtime flags.
+	reader.tryRead("leeroyJenkinsRuntimeTurns", _leeroyJenkinsRuntimeTurns);
+	reader.tryRead("sneakyRuntimeTurns",        _sneakyRuntimeTurns);
+	reader.tryRead("cautiousRuntimeTurns",      _cautiousRuntimeTurns);
+	reader.tryRead("flankerRuntimeTurns",       _flankerRuntimeTurns);
+	reader.tryRead("suppressorRuntimeTurns",    _suppressorRuntimeTurns);
 
 	_scriptValues.load(reader, shared);
 }
@@ -934,10 +945,16 @@ void BattleUnit::save(YAML::YamlNodeWriter writer, const ScriptGlobal *shared) c
 
 	writer.write("hasPanickedLastTurn", _hasPanickedLastTurn);
 
-	// pWWWa/test: brutalAI=3 (Mixed) runtime flags. Only written when set so
+	// Pandi: brutalAI=3 (Mixed) runtime flags. Only written when set so
 	// vanilla saves stay clean. Old engines just ignore the unknown field.
 	if (_isLeeroyJenkinsRuntime) writer.write("leeroyJenkinsRuntime", _isLeeroyJenkinsRuntime);
 	if (_isSneakyRuntime)        writer.write("sneakyRuntime",        _isSneakyRuntime);
+	// Pandi: brutalAI=4 (DynamicTraits) duration-based runtime flags.
+	if (_leeroyJenkinsRuntimeTurns > 0) writer.write("leeroyJenkinsRuntimeTurns", _leeroyJenkinsRuntimeTurns);
+	if (_sneakyRuntimeTurns > 0)        writer.write("sneakyRuntimeTurns",        _sneakyRuntimeTurns);
+	if (_cautiousRuntimeTurns > 0)      writer.write("cautiousRuntimeTurns",      _cautiousRuntimeTurns);
+	if (_flankerRuntimeTurns > 0)       writer.write("flankerRuntimeTurns",       _flankerRuntimeTurns);
+	if (_suppressorRuntimeTurns > 0)    writer.write("suppressorRuntimeTurns",    _suppressorRuntimeTurns);
 
 	// Save script values using the new writer method
 	_scriptValues.save(writer, shared);
@@ -4484,7 +4501,7 @@ bool BattleUnit::postMissionProcedures(const Mod *mod, SavedGame *geoscape, Save
 	int manaLoss = mod->getReplenishManaAfterMission() ? 0 : manaLossOriginal;
 	int healthLoss = mod->getReplenishHealthAfterMission() ? 0 : healthLossOriginal;
 
-	// pWWWa/test: tighter wound-recovery spread. Vanilla used RNG(hp*0.5, hp*1.5)
+	// Pandi: tighter wound-recovery spread. Vanilla used RNG(hp*0.5, hp*1.5)
 	// — that's a 3× max/min ratio, so a soldier who lost 20 HP could recover for
 	// anywhere between 10 and 30 days. Bumped to 0.75..1.25 (1.67× spread), e.g.
 	// 20 HP -> 15..25 days. Still has variation, but no more "lost 5 HP, recover
@@ -6457,7 +6474,7 @@ bool BattleUnit::wasMaxTusOfUpdate()
 
 bool BattleUnit::isLeeroyJenkins() const
 {
-	// pWWWa/test: brutalAI/Civilians = 3 is "DynamicMixed" — units are NOT
+	// Pandi: brutalAI/Civilians = 3 is "DynamicMixed" — units are NOT
 	// all Leeroy from turn 1, instead each individual gets the runtime flag
 	// flipped on by SavedBattleGame::updateMixedAggressionFlags() over the
 	// course of the mission, with probabilities driven by
@@ -6472,10 +6489,26 @@ bool BattleUnit::isLeeroyJenkins() const
 	// are HOSTILE in YAML but get controlled by the brutalCivilians option.
 	const bool dynMixed = (_faction == FACTION_HOSTILE)
 		&& (Options::brutalAI == 3 || Options::brutalCivilians == 3);
+	// Pandi: brutalAI/Civilians = 4 (DynamicTraits) uses duration-based
+	// Leeroy turns, separate from the sticky DynamicMixed flag used by mode 3.
+	const bool dynTraits = (_faction == FACTION_HOSTILE)
+		&& (Options::brutalAI == 4 || Options::brutalCivilians == 4);
 	return _isLeeroyJenkins
 		|| (_faction == FACTION_HOSTILE && Options::brutalAI       == 2)
 		|| (_faction == FACTION_HOSTILE && Options::brutalCivilians == 2)
-		|| (dynMixed && _isLeeroyJenkinsRuntime);
+		|| (dynMixed && _isLeeroyJenkinsRuntime)
+		|| (dynTraits && _leeroyJenkinsRuntimeTurns > 0);
+}
+
+
+// Pandi: decrease duration-based DynamicTraits runtime flags once per hostile turn.
+void BattleUnit::tickDynamicTraitRuntimeTurns()
+{
+	if (_leeroyJenkinsRuntimeTurns > 0) --_leeroyJenkinsRuntimeTurns;
+	if (_sneakyRuntimeTurns > 0) --_sneakyRuntimeTurns;
+	if (_cautiousRuntimeTurns > 0) --_cautiousRuntimeTurns;
+	if (_flankerRuntimeTurns > 0) --_flankerRuntimeTurns;
+	if (_suppressorRuntimeTurns > 0) --_suppressorRuntimeTurns;
 }
 
 float BattleUnit::getAggressiveness(std::string missionType) const
