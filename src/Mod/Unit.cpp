@@ -37,6 +37,7 @@ Unit::Unit(const std::string &type) :
 	_psiWeapon("ALIEN_PSI_WEAPON"), _capturable(true), _canSurrender(false), _autoSurrender(false),
 	_isLeeroyJenkins(false), _waitIfOutsideWeaponRange(false), _pickUpWeaponsMoreActively(-1), _avoidsFire(defBoolNullable),
 	_isBrutal(false), _isNotBrutal(false), _isCheatOnMovement(false), _isAggressive(false),
+	_isSneaky(false), _isCautious(false), _isFlanker(false), _isSuppressor(false),
 	_vip(false), _cosmetic(false), _ignoredByAI(false),
 	_canPanic(true), _canBeMindControlled(true), _berserkChance(33)
 {
@@ -104,10 +105,16 @@ void Unit::load(const YAML::YamlNodeReader& node, Mod* mod)
     reader.tryRead("canSurrender", _canSurrender);
     reader.tryRead("autoSurrender", _autoSurrender);
     reader.tryRead("isLeeroyJenkins", _isLeeroyJenkins);
+    // Pandi: permanent DynamicTraits flags. If set in ruleset/mini-patch,
+    // the corresponding behavior is always active for this unit type.
+    reader.tryRead("isSneaky", _isSneaky);
+    reader.tryRead("isCautious", _isCautious);
+    reader.tryRead("isFlanker", _isFlanker);
+    reader.tryRead("isSuppressor", _isSuppressor);
 
     // Custom additions
     reader.tryRead("isBrutal", _isBrutal);
-    // pWWWa/test: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
+    // Pandi: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
     // default 50. Higher = more units charge from turn 1 and faster all
     // remaining ones lose their cower-in-cover behaviour over the next turns.
     reader.tryRead("unitAggression", _unitAggression);
