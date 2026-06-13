@@ -62,7 +62,7 @@ ru:
   STR_BATTLETHROWNSPEED: "Скорость бросаемых предметов"
   STR_BATTLETHROWNSPEED_DESC: "Изменяет скорость полета бросаемых предметов: {NEWLINE}{ALT}0>{ALT} Совпадает со скоростью выстрелов;{NEWLINE}{ALT}1-20>{ALT} Значения соответствуют ползунку «Скорость выстрелов» в меню «Поле боя»."
   STR_BRUTALAI: "Тип ИИ"
-  STR_BRUTALAI_DESC: "{ALT}0>{ALT} Стандартный OpenXCom {ALT}1>{ALT} Brutal AI {ALT}2>{ALT} Seek & Destroy {ALT}3>{ALT} DynamicMixed (зависит от unitAggression каждой расы)"
+  STR_BRUTALAI_DESC: "{ALT}0>{ALT} Стандартный OpenXCom {ALT}1>{ALT} Brutal AI {ALT}2>{ALT} Seek & Destroy {ALT}3>{ALT} DynamicMixed (зависит от unitAggression каждой расы) {ALT}4>{ALT} DynamicTraits (временные флаги от статов)"
   STR_BRUTALCIVILIANS: "Тип ИИ для нейтралов"
   STR_BRUTALCIVILIANS_DESC: "Аналогично 'Тип ИИ', но для враждебной фауны/культистов (faction NEUTRAL). {ALT}0>{ALT} Стандартный {ALT}1>{ALT} Brutal {ALT}2>{ALT} Seek & Destroy {ALT}3>{ALT} DynamicMixed"
   STR_BRUTALCIVILIANS: ""
