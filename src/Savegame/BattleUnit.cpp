@@ -458,11 +458,16 @@ BattleUnit::BattleUnit(const Mod *mod, const Unit *unit, UnitFaction faction, in
 	_spawnUnit = unit->getSpawnUnit();
 	_capturable = unit->getCapturable();
 	_isLeeroyJenkins = unit->isLeeroyJenkins();
-	// Pandi: permanent DynamicTraits flags copied from ruleset/mini-patch.
+	// Pandi: permanent/disabled DynamicTraits flags copied from ruleset/mini-patch.
+	_disableLeeroyJenkins = unit->isLeeroyJenkinsDisabled();
 	_isSneaky = unit->isSneaky();
+	_disableSneaky = unit->isSneakyDisabled();
 	_isCautious = unit->isCautious();
+	_disableCautious = unit->isCautiousDisabled();
 	_isFlanker = unit->isFlanker();
+	_disableFlanker = unit->isFlankerDisabled();
 	_isSuppressor = unit->isSuppressor();
+	_disableSuppressor = unit->isSuppressorDisabled();
 	_isAggressive = unit->isAggressive();
 	if (unit->getPickUpWeaponsMoreActively() != -1)
 	{
@@ -762,6 +767,8 @@ void BattleUnit::load(const YAML::YamlNodeReader& node, const Mod *mod, const Sc
 	reader.tryRead("leeroyJenkinsRuntime", _isLeeroyJenkinsRuntime);
 	reader.tryRead("sneakyRuntime",        _isSneakyRuntime);
 	// Pandi: brutalAI=4 (DynamicTraits) duration-based runtime flags.
+	// Permanent/disabled trait controls are read live from current Unit rules so
+	// mini-patch changes apply cleanly to loaded tactical saves.
 	reader.tryRead("leeroyJenkinsRuntimeTurns", _leeroyJenkinsRuntimeTurns);
 	reader.tryRead("sneakyRuntimeTurns",        _sneakyRuntimeTurns);
 	reader.tryRead("cautiousRuntimeTurns",      _cautiousRuntimeTurns);
@@ -950,6 +957,8 @@ void BattleUnit::save(YAML::YamlNodeWriter writer, const ScriptGlobal *shared) c
 	if (_isLeeroyJenkinsRuntime) writer.write("leeroyJenkinsRuntime", _isLeeroyJenkinsRuntime);
 	if (_isSneakyRuntime)        writer.write("sneakyRuntime",        _isSneakyRuntime);
 	// Pandi: brutalAI=4 (DynamicTraits) duration-based runtime flags.
+	// Permanent/disabled trait controls are not saved: they come from current
+	// Unit rules/mini-patches so tests can be changed without stale save data.
 	if (_leeroyJenkinsRuntimeTurns > 0) writer.write("leeroyJenkinsRuntimeTurns", _leeroyJenkinsRuntimeTurns);
 	if (_sneakyRuntimeTurns > 0)        writer.write("sneakyRuntimeTurns",        _sneakyRuntimeTurns);
 	if (_cautiousRuntimeTurns > 0)      writer.write("cautiousRuntimeTurns",      _cautiousRuntimeTurns);
