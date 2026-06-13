@@ -111,7 +111,7 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	// i'm DONE with these out of bounds errors.
 	if (endPosition.x > _save->getMapSizeX() - size || endPosition.y > _save->getMapSizeY() - size || endPosition.x < 0 || endPosition.y < 0) return;
 
-	// pWWWa/test: classic vanilla "Sneaky AI" option only kicks in for non-Brutal
+	// Pandi: classic vanilla "Sneaky AI" option only kicks in for non-Brutal
 	// units. With brutalAI/Civilians=3 (DynamicMixed) we want individual Brutal
 	// units to ALSO be able to sneak when SavedBattleGame::updateMixedAggressionFlags()
 	// has flipped their per-unit runtime Sneaky flag on. Either source enables
@@ -121,8 +121,12 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	// is about wildlife/cultists, not engine's UnitFaction::NEUTRAL).
 	const bool dynMixed = (unit->getFaction() == FACTION_HOSTILE)
 		&& (Options::brutalAI == 3 || Options::brutalCivilians == 3);
+	// Pandi: brutalAI/Civilians = 4 (DynamicTraits) reuses the same Sneaky
+	// pathfinding hook, but the flag is duration-based instead of sticky.
+	const bool dynTraits = (unit->getFaction() == FACTION_HOSTILE)
+		&& (Options::brutalAI == 4 || Options::brutalCivilians == 4);
 	bool sneak = (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
-		|| (dynMixed && unit->isSneakyRuntime());
+		|| ((dynMixed || dynTraits) && unit->isSneakyRuntime());
 
 	auto movementType = getMovementType(unit, missileTarget, bam);
 	if (missileTarget != 0 && maxTUCost == -1 && bam == BAM_MISSILE) // pathfinding for missile
