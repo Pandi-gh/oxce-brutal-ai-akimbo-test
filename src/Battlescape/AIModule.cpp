@@ -4258,13 +4258,27 @@ void AIModule::brutalThink(BattleAction* action)
 					}
 				}
 			}
-			if (avoidMeleeRange)
-			{
-				attackScore /= 2;
-				directPeakScore /= 10;
-				indirectPeakScore /= 10;
-			}
-			moveMap[_save->getTileIndex(pos)] = me;
+				if (avoidMeleeRange)
+				{
+					attackScore /= 2;
+					directPeakScore /= 10;
+					indirectPeakScore /= 10;
+				}
+				// Pandi: DynamicTraits Cautious makes Brutal AI value safe cover positions
+				// more strongly without forbidding aggressive choices outright.
+				if (_unit->isCautiousRuntime())
+				{
+					greatCoverScore *= 1.50f;
+					goodCoverScore *= 1.35f;
+					okayCoverScore *= 1.20f;
+				}
+				// Pandi: DynamicTraits Flanker makes indirect/alternate peek positions
+				// more attractive, encouraging attacks from less direct angles.
+				if (_unit->isFlankerRuntime() && indirectPeakScore > 0)
+				{
+					indirectPeakScore *= 1.50f;
+				}
+				moveMap[_save->getTileIndex(pos)] = me;
 			if (attackScore > bestAttackScore)
 			{
 				bestAttackScore = attackScore;
@@ -5132,6 +5146,11 @@ float AIModule::brutalExtendedFireModeChoice(BattleActionCost &costAuto, BattleA
 	{
 		testAction.type = i;
 		float newScore = brutalScoreFiringMode(&testAction, _aggroTarget, checkLOF);
+		// Pandi: DynamicTraits Suppressor favors volume-of-fire modes in Brutal AI.
+		if (_unit->isSuppressorRuntime() && (i == BA_AUTOSHOT || i == BA_AKIMBOSHOT))
+		{
+			newScore *= 1.25f;
+		}
 
 		if (newScore > score)
 		{
