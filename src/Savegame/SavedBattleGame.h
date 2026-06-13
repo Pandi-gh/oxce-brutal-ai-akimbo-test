@@ -424,15 +424,19 @@ public:
 	const RuleCraftDeployment& getCustomDeployment(const RuleCraft* rule) const;
 	/// Ends the turn.
 	void endTurn();
-	/// Pandi: brutalAI=3 (DynamicMixed) per-turn aggression update. Walks all
-	/// hostile units once per hostile turn and probabilistically sets runtime
-	/// Leeroy/Sneaky flags based on Unit::getUnitAggression() (0..100).
-	/// Initial startLeeroy/startSneaky rolls are gated by
-	/// _mixedAggressionFlagsInitialized so that "no Leeroy yet" does not
-	/// accidentally repeat turn-1 logic forever. Old mid-mission saves get
-	/// one catch-up migration roll based on _mixedAggressionMigrationTurns.
-	void updateMixedAggressionFlags();
-	/// Gets animation frame.
+		/// Pandi: brutalAI=3 (DynamicMixed) per-turn aggression update. Walks all
+		/// hostile units once per hostile turn and probabilistically sets runtime
+		/// Leeroy/Sneaky flags based on Unit::getUnitAggression() (0..100).
+		/// Initial startLeeroy/startSneaky rolls are gated by
+		/// _mixedAggressionFlagsInitialized so that "no Leeroy yet" does not
+		/// accidentally repeat turn-1 logic forever. Old mid-mission saves get
+		/// one catch-up migration roll based on _mixedAggressionMigrationTurns.
+		void updateMixedAggressionFlags();
+		/// Pandi: brutalAI=4 (DynamicTraits) per-turn trait update. Rolls temporary
+		/// Leeroy/Sneaky/Cautious/Flanker/Suppressor flags from aggression and
+		/// intelligence using simple coefficient formulas.
+		void updateDynamicTraitFlags();
+		/// Gets animation frame.
 	int getAnimFrame() const;
 	/// Increase animation frame.
 	void nextAnimFrame();
