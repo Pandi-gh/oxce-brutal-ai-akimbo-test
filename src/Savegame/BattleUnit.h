@@ -182,16 +182,28 @@ private:
 	bool _breathing;
 	bool _hidingForTurn, _floorAbove, _respawn, _alreadyRespawned;
 	bool _isLeeroyJenkins;	// always charges enemy, never retreats.
-	/// pWWWa/test: runtime Leeroy flag for brutalAI=3 (Mixed). Set once per
+	/// Pandi: runtime Leeroy flag for brutalAI=3 (Mixed). Set once per
 	/// unit during the mission (sticky, never reverts), separately from the
 	/// ruleset _isLeeroyJenkins flag. Combined by isLeeroyJenkins() below.
 	bool _isLeeroyJenkinsRuntime = false;
-	/// pWWWa/test: runtime Sneaky flag for brutalAI=3 (Mixed). Starts true
-	/// for most units on turn 1 (% controlled by Unit::getUnitAggression()),
-	/// individually lost on later turns. Read by Pathfinding to make the unit
-	/// avoid tiles currently visible to the player.
-	bool _isSneakyRuntime = false;
-	bool _isAggressive;
+		/// Pandi: runtime Sneaky flag for brutalAI=3 (Mixed). Starts true
+		/// for most units on turn 1 (% controlled by Unit::getUnitAggression()),
+		/// individually lost on later turns. Read by Pathfinding to make the unit
+		/// avoid tiles currently visible to the player.
+		bool _isSneakyRuntime = false;
+		// Pandi: permanent DynamicTraits flags copied from Unit rules. These can
+		// be set by ruleset/mini-patch and stay active for the whole mission.
+		bool _isSneaky = false;
+		bool _isCautious = false;
+		bool _isFlanker = false;
+		bool _isSuppressor = false;
+		// Pandi: duration-based runtime flags for brutalAI=4 (DynamicTraits).
+		int _leeroyJenkinsRuntimeTurns = 0;
+		int _sneakyRuntimeTurns = 0;
+		int _cautiousRuntimeTurns = 0;
+		int _flankerRuntimeTurns = 0;
+		int _suppressorRuntimeTurns = 0;
+		bool _isAggressive;
 	bool _isBrutal;
 	bool _isNotBrutal;
 	bool _isCheatOnMovement;
@@ -913,14 +925,33 @@ public:
 		_isLeeroyJenkins = !_isLeeroyJenkins;
 		return _isLeeroyJenkins;
 	}
-	/// pWWWa/test: runtime Leeroy/Sneaky accessors for brutalAI=3 (Mixed).
+	/// Pandi: runtime Leeroy/Sneaky accessors for brutalAI=3 (Mixed).
 	/// The "sticky" flags are set by SavedBattleGame::updateMixedAggressionFlags()
 	/// at the start of each hostile turn based on Unit::getUnitAggression().
-	bool isLeeroyJenkinsRuntime() const { return _isLeeroyJenkinsRuntime; }
-	void setLeeroyJenkinsRuntime(bool v) { _isLeeroyJenkinsRuntime = v; }
-	bool isSneakyRuntime() const { return _isSneakyRuntime; }
-	void setSneakyRuntime(bool v) { _isSneakyRuntime = v; }
-	/// Get the unit's aggression-flag
+		bool isLeeroyJenkinsRuntime() const { return _isLeeroyJenkinsRuntime || _leeroyJenkinsRuntimeTurns > 0; }
+		void setLeeroyJenkinsRuntime(bool v) { _isLeeroyJenkinsRuntime = v; }
+		bool isSneakyRuntime() const { return _isSneaky || _isSneakyRuntime || _sneakyRuntimeTurns > 0; }
+		void setSneakyRuntime(bool v) { _isSneakyRuntime = v; }
+		// Pandi: DynamicTraits runtime/permanent accessors.
+		bool isCautiousRuntime() const { return _isCautious || _cautiousRuntimeTurns > 0; }
+		bool isFlankerRuntime() const { return _isFlanker || _flankerRuntimeTurns > 0; }
+		bool isSuppressorRuntime() const { return _isSuppressor || _suppressorRuntimeTurns > 0; }
+		bool hasPermanentSneaky() const { return _isSneaky; }
+		bool hasPermanentCautious() const { return _isCautious; }
+		bool hasPermanentFlanker() const { return _isFlanker; }
+		bool hasPermanentSuppressor() const { return _isSuppressor; }
+		int getLeeroyJenkinsRuntimeTurns() const { return _leeroyJenkinsRuntimeTurns; }
+		int getSneakyRuntimeTurns() const { return _sneakyRuntimeTurns; }
+		int getCautiousRuntimeTurns() const { return _cautiousRuntimeTurns; }
+		int getFlankerRuntimeTurns() const { return _flankerRuntimeTurns; }
+		int getSuppressorRuntimeTurns() const { return _suppressorRuntimeTurns; }
+		void setLeeroyJenkinsRuntimeTurns(int v) { _leeroyJenkinsRuntimeTurns = (v > 0 ? v : 0); }
+		void setSneakyRuntimeTurns(int v) { _sneakyRuntimeTurns = (v > 0 ? v : 0); }
+		void setCautiousRuntimeTurns(int v) { _cautiousRuntimeTurns = (v > 0 ? v : 0); }
+		void setFlankerRuntimeTurns(int v) { _flankerRuntimeTurns = (v > 0 ? v : 0); }
+		void setSuppressorRuntimeTurns(int v) { _suppressorRuntimeTurns = (v > 0 ? v : 0); }
+		void tickDynamicTraitRuntimeTurns();
+		/// Get the unit's aggression-flag
 	float getAggressiveness(std::string missionType) const;
 	/// Gets the spotter score. This is the number of turns sniper AI units can use spotting info from this unit.
 	int getSpotterDuration() const;
