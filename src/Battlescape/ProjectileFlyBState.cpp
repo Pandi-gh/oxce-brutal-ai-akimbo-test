@@ -521,12 +521,21 @@ bool ProjectileFlyBState::createNewProjectile()
 		}
 	}
 
-	// pWWWa/test: pierce bullet — initial damage of THIS particular projectile.
+		// Pandi: clear pierce per-shot state for EVERY new projectile, not only for
+		// ammo with pierceType. Otherwise a stale SHATTER marker from an older pierce
+		// shot can be consumed by a later non-pierce/plasma projectile before its own
+		// SHOT initialization path runs, producing an impact animation behind the shooter.
+		_parent->getSave()->getBattleGame()->piercePower = 0;
+		_parent->getSave()->getBattleGame()->piercePrevTile = Position(-1, -1, -1);
+		_parent->getSave()->getBattleGame()->piercePrevPart = -1;
+		_parent->getSave()->getBattleGame()->piercePrevThinkPos = Position(-1, -1, -1);
+		_parent->getSave()->getBattleGame()->pierceShatterAt = Position(-1, -1, -1);
+		_parent->getSave()->getBattleGame()->pierceShatterPart = -1;
+
+	// Pandi: pierce bullet — initial damage of THIS particular projectile.
 	// Conceptually piercePower is no longer a separate "pierce capacity" of the bullet;
 	// it is the CURRENT damage carried by the bullet. The base damage is rolled by
-	// RuleDamageType::getRandomDamage() ONCE here, at the muzzle, exactly as described:
-	//     "пуля вылетает из ствола имея базовый урон + бонус за статы, затем умножается
-	//      на модификатор полученный от броска кубика заданного для конкретной обоймы".
+	// RuleDamageType::getRandomDamage()
 	// As the bullet flies through obstacles, this value is reduced by finalDecr each
 	// terrain hit (Excel-formula); when it drops to <=0, Projectile::move() stops it.
 	if (_ammo && _ammo->getRules()->getPierceType() && !(_action.type == BA_LAUNCH && _action.actor->getPosition() != _origin ))
@@ -548,14 +557,14 @@ bool ProjectileFlyBState::createNewProjectile()
 		const int rolled = _ammo->getRules()->getDamageType()->getRandomDamage(basePower);
 		_parent->getSave()->getBattleGame()->piercePower = rolled;
 
-		// pWWWa/test: reset "last obstacle" markers for the new shot so the very first
+		// Pandi: reset "last obstacle" markers for the new shot so the very first
 		// terrain voxel the bullet enters is treated as a brand-new obstacle.
 		_parent->getSave()->getBattleGame()->piercePrevTile = Position(-1, -1, -1);
 		_parent->getSave()->getBattleGame()->piercePrevPart = -1;
-		// pWWWa/test: reset backscan "last think pos" — first think() of this shot will
+		// Pandi: reset backscan "last think pos" — first think() of this shot will
 		// only test getPosition(0) (no history to scan yet).
 		_parent->getSave()->getBattleGame()->piercePrevThinkPos = Position(-1, -1, -1);
-		// pWWWa/test: reset SHATTER marker for the new shot.
+		// Pandi: reset SHATTER marker for the new shot.
 		_parent->getSave()->getBattleGame()->pierceShatterAt   = Position(-1, -1, -1);
 		_parent->getSave()->getBattleGame()->pierceShatterPart = -1;
 
@@ -810,7 +819,7 @@ void ProjectileFlyBState::think()
 	{
 		auto attack = BattleActionAttack::GetAferShoot(_action, _ammo);
 
-		// pWWWa/test: pierce bullet handling.
+		// Pandi: pierce bullet handling.
 		//
 		// STEP 1 (this version): outcome #1 only for terrain — projectile passes through the
 		// obstacle, the obstacle STAYS INTACT, the bullet just loses pierce capacity (and the
@@ -834,7 +843,7 @@ void ProjectileFlyBState::think()
 			auto*       bgame = _parent->getSave()->getBattleGame();
 			const auto  dmgAOE = _ammo->getRules()->getPierceAOEDamageType();
 
-			// pWWWa/test: backscan. Projectile::move() advances by _speed voxels per
+			// Pandi: backscan. Projectile::move() advances by _speed voxels per
 			// think() tick. A high-speed bullet (sniper rifles + custom bulletSpeed)
 			// can skip narrow single-voxel obstacles like westwalls / northwalls
 			// entirely between two think() calls — voxelCheck() at getPosition(0)
@@ -862,7 +871,7 @@ void ProjectileFlyBState::think()
 				Tile*      tile = _parent->getSave()->getTile(pos.toTile());
 				const auto tp   = static_cast<TilePart>(_projectileImpact);
 
-				// pWWWa/test: floor (V_FLOOR) counts as a real obstacle too. Diagonal/vertical
+				// Pandi: floor (V_FLOOR) counts as a real obstacle too. Diagonal/vertical
 				// shots cross floors and roofs as legitimate pierce targets (think of firing
 				// down through a hole in the roof, or up through a second-storey floor).
 				// So the full V_FLOOR..V_UNIT range is in.
@@ -900,9 +909,9 @@ void ProjectileFlyBState::think()
 					//   armor         = tile.getMapData(part).getArmor()
 					//
 					// For terrain (V_FLOOR / V_WALL / V_OBJECT):
-					//   baseDecr      = armor * AE                 (Excel "Базовое торможение")
-					//   finalDecr     = sqrt(baseDecr^3 / damage)  (Excel "Итоговое торможение")
-					//   damageToWall  = damage * AE^2 * ToTile     (Excel "Урон забору" * ToTile)
+					//   baseDecr      = armor * AE                 (Excel "BaseStop")
+					//   finalDecr     = sqrt(baseDecr^3 / damage)  (Excel "FinalStop")
+					//   damageToWall  = damage * AE^2 * ToTile     (Excel "WallDamage" * ToTile)
 					// New damage carried forward     = damage - finalDecr.
 					// Wear accumulates per (tile, part); destroyed when wear >= armor * MUL.
 					//
@@ -967,8 +976,7 @@ void ProjectileFlyBState::think()
 						// T2 is used here on purpose for a seamless numeric transition between
 						// scratch and full-pierce zones (no jump in drag at D = T2). When D is
 						// only just above T1, (T2/D) is well above 1 and finalDecr ends up
-						// greater than D, so the bullet naturally gets stuck in the wall —
-						// matches the Excel "вмятинка, пуля внутри стены" picture.
+						// greater than D, so the bullet naturally gets stuck in the wall.
 						// ====================================================================
 						if (AE > 0.0f && tileArmor > 0 && damage > 0)
 						{
@@ -981,7 +989,7 @@ void ProjectileFlyBState::think()
 								damageToWall         = 0;
 								piercePowerDecrement = damage; // force piercePower to 0
 
-								// pWWWa/test: remember the EXACT voxel on the obstacle's
+								// Pandi: remember the EXACT voxel on the obstacle's
 								// surface so the impact-ExplosionBState below spawns at the
 								// right spot regardless of where Projectile::move() finally
 								// halts the bullet.
@@ -1025,7 +1033,7 @@ void ProjectileFlyBState::think()
 								piercePowerDecrement  = (int)std::round(finalDec);
 							}
 						}
-						// AE == 0 -> "нейтринная" пуля: 0 decrement, 0 wear, летит сквозь.
+						// AE == 0 -> "neutrino" bullet: 0 decrement, 0 wear, fly through.
 					}
 
 					// ----- terrain wear / destruction (OUTCOME 2) -----
@@ -1098,7 +1106,7 @@ void ProjectileFlyBState::think()
 					// ----- spend bullet damage AFTER applying effects -----
 					bgame->piercePower -= piercePowerDecrement;
 
-					// pWWWa/test: STOPPED-on-obstacle impact override.
+					// Pandi: STOPPED-on-obstacle impact override.
 					// If this decrement just emptied piercePower on a terrain part, the
 					// projectile will be halted by Projectile::move() on its next tick,
 					// but only AFTER advancing by one more voxel (the move() loop checks
@@ -1118,7 +1126,7 @@ void ProjectileFlyBState::think()
 						bgame->pierceShatterPart = obstaclePart;
 					}
 
-					// ----- pWWWa/test: "heavy pass-through" audible feedback ------------
+					// ----- Pandi: "heavy pass-through" audible feedback ------------
 					// Visual feedback for an obstacle that drained more than half of the
 					// bullet's INCOMING energy on the way through it. Fires only on
 					// OUTCOME 1 / OUTCOME 2 (i.e. the bullet still has damage left), so
@@ -1193,7 +1201,7 @@ void ProjectileFlyBState::think()
 						outcomeTag = " => TERRAIN OUTCOME 3 (STOPPED on obstacle)";
 					}
 
-					// pWWWa/test: in SHATTER (Zone A) wearAfter / wearThreshold are both
+					// Pandi: in SHATTER (Zone A) wearAfter / wearThreshold are both
 					// zero by design — we never even compute them — so the bare "(0/0)" in
 					// the log used to look like a missing value. Print "(SHATTER)" instead
 					// to make it obvious that the bullet shattered on the surface.
@@ -1238,7 +1246,7 @@ void ProjectileFlyBState::think()
 				}
 			}; // end of handlePierceVoxel lambda
 
-			// pWWWa/test: backscan over voxels crossed since last think() tick.
+			// Pandi: backscan over voxels crossed since last think() tick.
 			// Walk from oldest (-N) to newest (0). N = min(kBackscanDepth, distance
 			// from current voxel to previous-tick voxel). If we never ran think()
 			// before for this shot, N = kBackscanDepth (just be safe).
@@ -1356,13 +1364,15 @@ void ProjectileFlyBState::think()
 					_action.weapon->spendAmmoForAction(_action.type, _parent->getSave());
 				}
 
-				// pWWWa/test: pierce override forces us into the explosion path even if
+				// Pandi: pierce override forces us into the explosion path even if
 				// _projectileImpact got reclassified to V_OUTOFBOUNDS by the
 				// post-backscan fallback above (happens when the bullet halted on a
 				// wall but Projectile::move() advanced one extra voxel into open air
 				// before returning false).
-				const bool pierceShatterPending =
-					_parent->getSave()->getBattleGame()->pierceShatterAt.x >= 0;
+					const bool currentPierceProjectile =
+						_ammo && _ammo->getRules()->getPierceType() && !_ammo->getRules()->getShotgunPellets();
+					const bool pierceShatterPending =
+						currentPierceProjectile && _parent->getSave()->getBattleGame()->pierceShatterAt.x >= 0;
 				if (_projectileImpact != V_OUTOFBOUNDS
 					|| (_ammo && _ammo->getRules()->getShotgunPellets())
 					|| pierceShatterPending)
@@ -1375,69 +1385,88 @@ void ProjectileFlyBState::think()
 						offset = -2;
 					}
 
-					// pWWWa/test: if this pierce bullet shattered (Zone A), the hit
+					// Pandi: if this pierce bullet shattered (Zone A), the hit
 					// animation MUST appear on the obstacle's surface, not at wherever
 					// Projectile::move() happened to stop. Override the impact center
 					// with the SHATTER voxel we recorded earlier.
 					auto* _bgame = _parent->getSave()->getBattleGame();
 					LastPositions impactCenter = _parent->getMap()->getProjectile()->getLastPositions(offset);
-					if (_bgame->pierceShatterAt.x >= 0)
-					{
-						impactCenter = LastPositions(_bgame->pierceShatterAt, _bgame->pierceShatterAt);
-						// Also lock _projectileImpact to the actual obstacle part so the
-						// branch below doesn't accidentally fall into V_OUTOFBOUNDS code.
-						_projectileImpact = (VoxelType)_bgame->pierceShatterPart;
-						Log(LOG_INFO) << "[PIERCE] SHATTER impact override at vox=("
-							<< _bgame->pierceShatterAt.x << ','
-							<< _bgame->pierceShatterAt.y << ','
-							<< _bgame->pierceShatterAt.z << ") part="
-							<< _bgame->pierceShatterPart;
-
-						// pWWWa/test: pre-seed the spark sprite ourselves. The upstream
-						// ExplosionBState::init() decides _power=0 for pierce bullets
-						// (it correctly assumes our pierce code has already dealt the
-						// damage) and on `miss==true` falls back to HitMissAnimation,
-						// which is undefined for many ammos — anim ends up at -1 and
-						// no sprite is spawned. To avoid that "audible but invisible"
-						// hit, we push the standard hit Explosion ourselves right here.
-						// ExplosionBState that we statePushFront() below will then see
-						// a non-empty getExplosions() list, skip its own explode(), and
-						// just animate ours via think() — same path that shotgun
-						// pellets use, which is known to work reliably.
-						const int hitAnim   = _ammo->getRules()->getHitAnimation();
-						const int hitFrames = _ammo->getRules()->getHitAnimationFrames();
-						if (hitAnim >= 0)
+						if (!currentPierceProjectile && _bgame->pierceShatterAt.x >= 0)
 						{
-							_parent->getMap()->getExplosions()->push_back(
-								new Explosion(_bgame->pierceShatterAt,
-									hitAnim, 0, false, false, hitFrames));
+							// Pandi: safety net for old/stale markers. Non-pierce projectiles
+							// must never consume pierce SHATTER impact overrides.
+							Log(LOG_INFO) << "[PIERCE] stale SHATTER marker cleared for non-pierce projectile at vox=("
+								<< _bgame->pierceShatterAt.x << ','
+								<< _bgame->pierceShatterAt.y << ','
+								<< _bgame->pierceShatterAt.z << ") part="
+								<< _bgame->pierceShatterPart;
+							_bgame->pierceShatterAt = Position(-1, -1, -1);
+							_bgame->pierceShatterPart = -1;
+						}
+						if (currentPierceProjectile && _bgame->pierceShatterAt.x >= 0)
+						{
+							const Position pierceImpactAt = _bgame->pierceShatterAt;
+							const int pierceImpactPart = _bgame->pierceShatterPart;
+							impactCenter = LastPositions(pierceImpactAt, pierceImpactAt);
+							// Also lock _projectileImpact to the actual obstacle part so the
+							// branch below doesn't accidentally fall into V_OUTOFBOUNDS code.
+							_projectileImpact = (VoxelType)pierceImpactPart;
+							Log(LOG_INFO) << "[PIERCE] SHATTER impact override at vox=("
+								<< pierceImpactAt.x << ','
+								<< pierceImpactAt.y << ','
+								<< pierceImpactAt.z << ") part="
+								<< pierceImpactPart;
 
-							// pWWWa/test: force-show the spark even if the obstacle tile
-							// is outside the player's FOV. Map::draw() reads
-							// tile->getVisible() before drawing each explosion sprite
-							// and silently skips invisible ones (see Map.cpp around
-							// line 343 where _explosionInFOV is computed). That meant
-							// "audible-only" hits on any wall BEHIND another wall —
-							// the impact tile is geometrically out of LOS and gets
-							// drawn invisibly. Bumping +1 here makes Map::draw() pick
-							// the sprite up. We do NOT decrement back: calculateFOV()
-							// runs after every unit move / action and recomputes the
-							// _visible counter from scratch, so this leak is bounded
-							// and harmless (Sint16 holds 30k+ accumulated bumps).
-							Tile* sparkTile = _parent->getSave()->getTile(
-								_bgame->pierceShatterAt.toTile());
-							const int visBefore = sparkTile ? sparkTile->getVisible() : -1;
-							if (sparkTile && visBefore == 0)
+							// Pandi: pre-seed the spark sprite ourselves. The upstream
+							// ExplosionBState::init() decides _power=0 for pierce bullets
+							// (it correctly assumes our pierce code has already dealt the
+							// damage) and on `miss==true` falls back to HitMissAnimation,
+							// which is undefined for many ammos — anim ends up at -1 and
+							// no sprite is spawned. To avoid that "audible but invisible"
+							// hit, we push the standard hit Explosion ourselves right here.
+							// ExplosionBState that we statePushFront() below will then see
+							// a non-empty getExplosions() list, skip its own explode(), and
+							// just animate ours via think() — same path that shotgun
+							// pellets use, which is known to work reliably.
+							const int hitAnim   = _ammo->getRules()->getHitAnimation();
+							const int hitFrames = _ammo->getRules()->getHitAnimationFrames();
+							if (hitAnim >= 0)
 							{
-								sparkTile->setVisible(+1);
+								_parent->getMap()->getExplosions()->push_back(
+									new Explosion(pierceImpactAt,
+										hitAnim, 0, false, false, hitFrames));
+
+								// Pandi: force-show the spark even if the obstacle tile
+								// is outside the player's FOV. Map::draw() reads
+								// tile->getVisible() before drawing each explosion sprite
+								// and silently skips invisible ones (see Map.cpp around
+								// line 343 where _explosionInFOV is computed). That meant
+								// "audible-only" hits on any wall BEHIND another wall —
+								// the impact tile is geometrically out of LOS and gets
+								// drawn invisibly. Bumping +1 here makes Map::draw() pick
+								// the sprite up. We do NOT decrement back: calculateFOV()
+								// runs after every unit move / action and recomputes the
+								// _visible counter from scratch, so this leak is bounded
+								// and harmless (Sint16 holds 30k+ accumulated bumps).
+								Tile* sparkTile = _parent->getSave()->getTile(
+									pierceImpactAt.toTile());
+								const int visBefore = sparkTile ? sparkTile->getVisible() : -1;
+								if (sparkTile && visBefore == 0)
+								{
+									sparkTile->setVisible(+1);
+								}
+
+								Log(LOG_INFO) << "[PIERCE] pre-seeded hit Explosion (anim="
+									<< hitAnim << " frames=" << hitFrames
+									<< ") tileVisibleBefore=" << visBefore;
 							}
 
-							Log(LOG_INFO) << "[PIERCE] pre-seeded hit Explosion (anim="
-								<< hitAnim << " frames=" << hitFrames
-								<< ") tileVisibleBefore=" << visBefore;
+							// Pandi: consume marker immediately after using it. It belongs to
+							// this impact only and must not leak into later reaction/autoshots.
+							_bgame->pierceShatterAt = Position(-1, -1, -1);
+							_bgame->pierceShatterPart = -1;
+							Log(LOG_INFO) << "[PIERCE] SHATTER marker consumed and cleared";
 						}
-					}
-
 					_parent->statePushFront(new ExplosionBState(
 						_parent, impactCenter,
 						attack, 0,
@@ -1549,7 +1578,7 @@ void ProjectileFlyBState::think()
 				}
 			}
 
-			// pWWWa/test: pierce diagnostic — projectile end-of-life marker. Pairs with
+			// Pandi: pierce diagnostic — projectile end-of-life marker. Pairs with
 			// the [PIERCE] SHOT line from createNewProjectile() so it's obvious whether a
 			// shot really hit nothing (SHOT followed directly by END with no NEWs between)
 			// versus the rest of the log just being elsewhere on screen.
