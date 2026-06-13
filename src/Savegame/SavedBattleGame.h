@@ -102,9 +102,13 @@ private:
 	bool _nameDisplay;
 	bool _debugMode, _bughuntMode;
 	// Pandi: DynamicMixed initialization marker for brutalAI=3.
-	// False for fresh/old battles until the initial startLeeroy/startSneaky
-	// distribution has been rolled exactly once; then per-turn deltas are used.
+	// False until the initial startLeeroy/startSneaky distribution, or an
+	// old-save migration equivalent, has been rolled exactly once.
 	bool _mixedAggressionFlagsInitialized;
+	// Pandi: for old saves that predate mixedAggressionFlagsInitialized.
+	// If loaded mid-mission, the next DynamicMixed update performs one
+	// catch-up roll equivalent to this many already elapsed hostile turns.
+	int _mixedAggressionMigrationTurns;
 	bool _aborted;
 	bool _baseCraftInventory = false;
 	int _itemId;
@@ -425,7 +429,8 @@ public:
 	/// Leeroy/Sneaky flags based on Unit::getUnitAggression() (0..100).
 	/// Initial startLeeroy/startSneaky rolls are gated by
 	/// _mixedAggressionFlagsInitialized so that "no Leeroy yet" does not
-	/// accidentally repeat turn-1 logic forever.
+	/// accidentally repeat turn-1 logic forever. Old mid-mission saves get
+	/// one catch-up migration roll based on _mixedAggressionMigrationTurns.
 	void updateMixedAggressionFlags();
 	/// Gets animation frame.
 	int getAnimFrame() const;
