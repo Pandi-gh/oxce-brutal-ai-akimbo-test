@@ -471,7 +471,9 @@ private:
 	bool _capturable;
 	bool _canSurrender, _autoSurrender;
 	bool _isLeeroyJenkins, _isBrutal, _isCheatOnMovement, _isAggressive, _isNotBrutal;
-	/// pWWWa/test: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
+		// Pandi: permanent DynamicTraits flags. Can be set from ruleset/mini-patch.
+		bool _isSneaky, _isCautious, _isFlanker, _isSuppressor;
+	/// Pandi: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
 	/// default 50. Controls per-turn probabilities for runtime Leeroy/Sneaky
 	/// flag transitions on individual BattleUnits of this type. See
 	/// SavedBattleGame::updateMixedAggressionFlags() for the table.
@@ -585,10 +587,15 @@ public:
 	bool canSurrender() const;
 	/// Checks if this unit surrenders automatically, if all other units surrendered too.
 	bool autoSurrender() const;
-	bool isLeeroyJenkins() const { return _isLeeroyJenkins; };
-	/// Checks if the unit is aggressive
+		bool isLeeroyJenkins() const { return _isLeeroyJenkins; };
+		// Pandi: permanent DynamicTraits flags from ruleset.
+		bool isSneaky() const { return _isSneaky; };
+		bool isCautious() const { return _isCautious; };
+		bool isFlanker() const { return _isFlanker; };
+		bool isSuppressor() const { return _isSuppressor; };
+		/// Checks if the unit is aggressive
 	bool isAggressive() const { return _isAggressive; };
-	/// pWWWa/test: per-race aggression value for brutalAI=3 (Mixed) mode.
+	/// Pandi: per-race aggression value for brutalAI=3 (Mixed) mode.
 	int getUnitAggression() const { return _unitAggression; };
 	/// Checks if the unit is using brutal-AI
 	bool isBrutal() const { return _isBrutal; };
