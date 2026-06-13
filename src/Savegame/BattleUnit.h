@@ -193,10 +193,15 @@ private:
 		bool _isSneakyRuntime = false;
 		// Pandi: permanent DynamicTraits flags copied from Unit rules. These can
 		// be set by ruleset/mini-patch and stay active for the whole mission.
+		bool _disableLeeroyJenkins = false;
 		bool _isSneaky = false;
+		bool _disableSneaky = false;
 		bool _isCautious = false;
+		bool _disableCautious = false;
 		bool _isFlanker = false;
+		bool _disableFlanker = false;
 		bool _isSuppressor = false;
+		bool _disableSuppressor = false;
 		// Pandi: duration-based runtime flags for brutalAI=4 (DynamicTraits).
 		int _leeroyJenkinsRuntimeTurns = 0;
 		int _sneakyRuntimeTurns = 0;
@@ -936,10 +941,15 @@ public:
 		bool isCautiousRuntime() const { return _isCautious || _cautiousRuntimeTurns > 0; }
 		bool isFlankerRuntime() const { return _isFlanker || _flankerRuntimeTurns > 0; }
 		bool isSuppressorRuntime() const { return _isSuppressor || _suppressorRuntimeTurns > 0; }
+		bool isLeeroyJenkinsRuntimeDisabled() const { return _disableLeeroyJenkins; }
 		bool hasPermanentSneaky() const { return _isSneaky; }
+		bool isSneakyRuntimeDisabled() const { return _disableSneaky; }
 		bool hasPermanentCautious() const { return _isCautious; }
+		bool isCautiousRuntimeDisabled() const { return _disableCautious; }
 		bool hasPermanentFlanker() const { return _isFlanker; }
+		bool isFlankerRuntimeDisabled() const { return _disableFlanker; }
 		bool hasPermanentSuppressor() const { return _isSuppressor; }
+		bool isSuppressorRuntimeDisabled() const { return _disableSuppressor; }
 		int getLeeroyJenkinsRuntimeTurns() const { return _leeroyJenkinsRuntimeTurns; }
 		int getSneakyRuntimeTurns() const { return _sneakyRuntimeTurns; }
 		int getCautiousRuntimeTurns() const { return _cautiousRuntimeTurns; }
