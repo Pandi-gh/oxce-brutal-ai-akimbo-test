@@ -472,7 +472,7 @@ private:
 	bool _canSurrender, _autoSurrender;
 	bool _isLeeroyJenkins, _isBrutal, _isCheatOnMovement, _isAggressive, _isNotBrutal;
 		// Pandi: permanent DynamicTraits flags. Can be set from ruleset/mini-patch.
-		bool _isSneaky, _isCautious, _isFlanker, _isSuppressor;
+		bool _disableLeeroyJenkins, _isSneaky, _disableSneaky, _isCautious, _disableCautious, _isFlanker, _disableFlanker, _isSuppressor, _disableSuppressor;
 	/// Pandi: per-race aggression for brutalAI=3 (Mixed) mode. 0..100,
 	/// default 50. Controls per-turn probabilities for runtime Leeroy/Sneaky
 	/// flag transitions on individual BattleUnits of this type. See
@@ -588,11 +588,17 @@ public:
 	/// Checks if this unit surrenders automatically, if all other units surrendered too.
 	bool autoSurrender() const;
 		bool isLeeroyJenkins() const { return _isLeeroyJenkins; };
-		// Pandi: permanent DynamicTraits flags from ruleset.
+		// Pandi: permanent/disabled DynamicTraits flags from ruleset. Explicit
+		// `isX: false` disables runtime rolling for X; omitted means dynamic.
+		bool isLeeroyJenkinsDisabled() const { return _disableLeeroyJenkins; };
 		bool isSneaky() const { return _isSneaky; };
+		bool isSneakyDisabled() const { return _disableSneaky; };
 		bool isCautious() const { return _isCautious; };
+		bool isCautiousDisabled() const { return _disableCautious; };
 		bool isFlanker() const { return _isFlanker; };
+		bool isFlankerDisabled() const { return _disableFlanker; };
 		bool isSuppressor() const { return _isSuppressor; };
+		bool isSuppressorDisabled() const { return _disableSuppressor; };
 		/// Checks if the unit is aggressive
 	bool isAggressive() const { return _isAggressive; };
 	/// Pandi: per-race aggression value for brutalAI=3 (Mixed) mode.
