@@ -37,7 +37,7 @@ Unit::Unit(const std::string &type) :
 	_psiWeapon("ALIEN_PSI_WEAPON"), _capturable(true), _canSurrender(false), _autoSurrender(false),
 	_isLeeroyJenkins(false), _waitIfOutsideWeaponRange(false), _pickUpWeaponsMoreActively(-1), _avoidsFire(defBoolNullable),
 	_isBrutal(false), _isNotBrutal(false), _isCheatOnMovement(false), _isAggressive(false),
-	_isSneaky(false), _isCautious(false), _isFlanker(false), _isSuppressor(false),
+	_disableLeeroyJenkins(false), _isSneaky(false), _disableSneaky(false), _isCautious(false), _disableCautious(false), _isFlanker(false), _disableFlanker(false), _isSuppressor(false), _disableSuppressor(false),
 	_vip(false), _cosmetic(false), _ignoredByAI(false),
 	_canPanic(true), _canBeMindControlled(true), _berserkChance(33)
 {
@@ -104,13 +104,35 @@ void Unit::load(const YAML::YamlNodeReader& node, Mod* mod)
     reader.tryRead("livingWeapon", _livingWeapon);
     reader.tryRead("canSurrender", _canSurrender);
     reader.tryRead("autoSurrender", _autoSurrender);
-    reader.tryRead("isLeeroyJenkins", _isLeeroyJenkins);
-    // Pandi: permanent DynamicTraits flags. If set in ruleset/mini-patch,
-    // the corresponding behavior is always active for this unit type.
-    reader.tryRead("isSneaky", _isSneaky);
-    reader.tryRead("isCautious", _isCautious);
-    reader.tryRead("isFlanker", _isFlanker);
-    reader.tryRead("isSuppressor", _isSuppressor);
+    if (reader["isLeeroyJenkins"])
+    {
+        _isLeeroyJenkins = reader["isLeeroyJenkins"].readVal(false);
+        // Pandi: explicit false disables DynamicTraits runtime rolling for Leeroy.
+        _disableLeeroyJenkins = !_isLeeroyJenkins;
+    }
+    // Pandi: permanent/disabled DynamicTraits flags. If a flag is true in
+    // ruleset/mini-patch it is always active; if explicitly false, runtime
+    // rolling for that flag is disabled; if omitted, it remains dynamic.
+    if (reader["isSneaky"])
+    {
+        _isSneaky = reader["isSneaky"].readVal(false);
+        _disableSneaky = !_isSneaky;
+    }
+    if (reader["isCautious"])
+    {
+        _isCautious = reader["isCautious"].readVal(false);
+        _disableCautious = !_isCautious;
+    }
+    if (reader["isFlanker"])
+    {
+        _isFlanker = reader["isFlanker"].readVal(false);
+        _disableFlanker = !_isFlanker;
+    }
+    if (reader["isSuppressor"])
+    {
+        _isSuppressor = reader["isSuppressor"].readVal(false);
+        _disableSuppressor = !_isSuppressor;
+    }
 
     // Custom additions
     reader.tryRead("isBrutal", _isBrutal);
