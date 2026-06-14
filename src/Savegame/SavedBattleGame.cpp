@@ -4182,6 +4182,29 @@ void SavedBattleGame::updateDynamicTraitFlags()
 			rulesetSuppressorDisabled,
 			bu->getSuppressorRuntimeTurns() > 0,
 			TRAIT_SUPPRESSOR);
+
+		// Pandi: diagnostic summary for traceAI. Shows what traits the unit will
+		// actually carry into Brutal AI after tick, ruleset overrides and rolls.
+		if (Options::traceAI)
+		{
+			Log(LOG_INFO) << "[TRAIT] active summary unit=" << bu->getId()
+				<< " type=" << bu->getType()
+				<< " L=" << ((rulesetLeeroyPermanent || bu->getLeeroyJenkinsRuntimeTurns() > 0) ? 1 : 0)
+				<< "(" << bu->getLeeroyJenkinsRuntimeTurns() << ")"
+				<< " S=" << (bu->isSneakyRuntime() ? 1 : 0)
+				<< "(" << bu->getSneakyRuntimeTurns() << ")"
+				<< " C=" << (bu->isCautiousRuntime() ? 1 : 0)
+				<< "(" << bu->getCautiousRuntimeTurns() << ")"
+				<< " F=" << (bu->isFlankerRuntime() ? 1 : 0)
+				<< "(" << bu->getFlankerRuntimeTurns() << ")"
+				<< " P=" << (bu->isSuppressorRuntime() ? 1 : 0)
+				<< "(" << bu->getSuppressorRuntimeTurns() << ")"
+				<< " disabled L=" << (rulesetLeeroyDisabled ? 1 : 0)
+				<< " S=" << (rulesetSneakyDisabled ? 1 : 0)
+				<< " C=" << (rulesetCautiousDisabled ? 1 : 0)
+				<< " F=" << (rulesetFlankerDisabled ? 1 : 0)
+				<< " P=" << (rulesetSuppressorDisabled ? 1 : 0);
+		}
 	}
 
 	Log(LOG_INFO) << "[TRAIT] updateDynamicTraitFlags EXIT"
