@@ -4268,15 +4268,33 @@ void AIModule::brutalThink(BattleAction* action)
 				// more strongly without forbidding aggressive choices outright.
 				if (_unit->isCautiousRuntime())
 				{
+					const float oldGreatCoverScore = greatCoverScore;
+					const float oldGoodCoverScore = goodCoverScore;
+					const float oldOkayCoverScore = okayCoverScore;
 					greatCoverScore *= 1.50f;
 					goodCoverScore *= 1.35f;
 					okayCoverScore *= 1.20f;
+					if (_traceAI && (oldGreatCoverScore > 0 || oldGoodCoverScore > 0 || oldOkayCoverScore > 0))
+					{
+						Log(LOG_INFO) << "[TRAIT] CAUTIOUS cover boost unit=" << _unit->getId()
+							<< " pos=" << pos
+							<< " great=" << oldGreatCoverScore << "->" << greatCoverScore
+							<< " good=" << oldGoodCoverScore << "->" << goodCoverScore
+							<< " okay=" << oldOkayCoverScore << "->" << okayCoverScore;
+					}
 				}
 				// Pandi: DynamicTraits Flanker makes indirect/alternate peek positions
 				// more attractive, encouraging attacks from less direct angles.
 				if (_unit->isFlankerRuntime() && indirectPeakScore > 0)
 				{
+					const float oldIndirectPeakScore = indirectPeakScore;
 					indirectPeakScore *= 1.50f;
+					if (_traceAI)
+					{
+						Log(LOG_INFO) << "[TRAIT] FLANKER indirect boost unit=" << _unit->getId()
+							<< " pos=" << pos
+							<< " indirect=" << oldIndirectPeakScore << "->" << indirectPeakScore;
+					}
 				}
 				moveMap[_save->getTileIndex(pos)] = me;
 			if (attackScore > bestAttackScore)
@@ -5149,7 +5167,14 @@ float AIModule::brutalExtendedFireModeChoice(BattleActionCost &costAuto, BattleA
 		// Pandi: DynamicTraits Suppressor favors volume-of-fire modes in Brutal AI.
 		if (_unit->isSuppressorRuntime() && (i == BA_AUTOSHOT || i == BA_AKIMBOSHOT))
 		{
+			const float oldScore = newScore;
 			newScore *= 1.25f;
+			if (_traceAI)
+			{
+				Log(LOG_INFO) << "[TRAIT] SUPPRESSOR fire mode boost unit=" << _unit->getId()
+					<< " mode=" << (int)i
+					<< " score=" << oldScore << "->" << newScore;
+			}
 		}
 
 		if (newScore > score)
