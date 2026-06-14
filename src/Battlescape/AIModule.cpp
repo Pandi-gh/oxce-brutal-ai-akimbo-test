@@ -4012,22 +4012,34 @@ void AIModule::brutalThink(BattleAction* action)
 					{
 						const int autoRange = _attackAction.weapon->getRules()->getAutoRange();
 						const int snapRange = _attackAction.weapon->getRules()->getSnapRange();
+						const int autoCost = _unit->getActionTUs(BA_AUTOSHOT, _attackAction.weapon).Time;
+						const int snapCost = _unit->getActionTUs(BA_SNAPSHOT, _attackAction.weapon).Time;
+						const int autoBursts = autoCost > 0 ? remainingTimeUnits / autoCost : 0;
+						const int snapBursts = snapCost > 0 ? remainingTimeUnits / snapCost : 0;
 						float factor = 1.0f;
-						if (autoRange > 0 && closestEnemyDistValid <= autoRange)
+						// Pandi: prefer a "suppression cadence" position. For Uzi-like guns this
+						// usually means moving closer until two snap-bursts are possible and the
+						// range penalty is not catastrophic; full-auto is preferred only when its
+						// own range/cost profile is actually viable.
+						if (autoRange > 0 && autoBursts >= 1 && closestEnemyDistValid <= autoRange)
+						{
+							factor = 1.50f;
+						}
+						else if (snapRange > 0 && snapBursts >= 2 && closestEnemyDistValid <= snapRange * 1.50f)
 						{
 							factor = 1.35f;
 						}
-						else if (snapRange > 0 && closestEnemyDistValid <= snapRange * 0.75f)
+						else if (snapRange > 0 && snapBursts >= 2 && closestEnemyDistValid <= snapRange * 1.75f)
 						{
-							factor = 1.20f;
+							factor = 1.15f;
 						}
-						else if (snapRange > 0 && closestEnemyDistValid <= snapRange)
+						else if (snapRange > 0 && snapBursts >= 1 && closestEnemyDistValid <= snapRange * 1.50f)
 						{
-							factor = 0.90f;
+							factor = 1.0f;
 						}
 						else
 						{
-							factor = 0.70f;
+							factor = 0.55f;
 						}
 						const float oldAttackScore = attackScore;
 						attackScore *= factor;
@@ -4039,6 +4051,8 @@ void AIModule::brutalThink(BattleAction* action)
 								<< " dist=" << closestEnemyDistValid
 								<< " autoRange=" << autoRange
 								<< " snapRange=" << snapRange
+								<< " autoBursts=" << autoBursts
+								<< " snapBursts=" << snapBursts
 								<< " factor=" << factor
 								<< " attack=" << oldAttackScore << "->" << attackScore;
 						}
@@ -5212,15 +5226,15 @@ float AIModule::brutalExtendedFireModeChoice(BattleActionCost &costAuto, BattleA
 		{
 			if (i == BA_AUTOSHOT)
 			{
-				suppressorFactor = 1.35f;
+				suppressorFactor = 1.50f;
 			}
 			else if (i == BA_AKIMBOSHOT)
 			{
-				suppressorFactor = 1.25f;
+				suppressorFactor = 1.35f;
 			}
 			else if (i == BA_SNAPSHOT)
 			{
-				suppressorFactor = 1.15f;
+				suppressorFactor = 1.35f;
 			}
 			if (suppressorFactor != 1.0f)
 			{
