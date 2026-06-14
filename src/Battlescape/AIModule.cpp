@@ -4005,6 +4005,44 @@ void AIModule::brutalThink(BattleAction* action)
 						attackScore *= exposureMod;
 						me.attackPotential *= exposureMod;
 					}
+					// Pandi: DynamicTraits Suppressor should not only prefer burst fire
+					// after choosing a tile; it should also prefer attack positions where
+					// burst/snap-burst modes have a reasonable range profile.
+					if (_unit->isSuppressorRuntime() && _attackAction.weapon && _attackAction.weapon->getRules())
+					{
+						const int autoRange = _attackAction.weapon->getRules()->getAutoRange();
+						const int snapRange = _attackAction.weapon->getRules()->getSnapRange();
+						float factor = 1.0f;
+						if (autoRange > 0 && closestEnemyDistValid <= autoRange)
+						{
+							factor = 1.35f;
+						}
+						else if (snapRange > 0 && closestEnemyDistValid <= snapRange * 0.75f)
+						{
+							factor = 1.20f;
+						}
+						else if (snapRange > 0 && closestEnemyDistValid <= snapRange)
+						{
+							factor = 0.90f;
+						}
+						else
+						{
+							factor = 0.70f;
+						}
+						const float oldAttackScore = attackScore;
+						attackScore *= factor;
+						me.attackPotential *= factor;
+						if (_traceAI && oldAttackScore > 0 && factor != 1.0f)
+						{
+							Log(LOG_INFO) << "[TRAIT] SUPPRESSOR position bias unit=" << _unit->getId()
+								<< " pos=" << pos
+								<< " dist=" << closestEnemyDistValid
+								<< " autoRange=" << autoRange
+								<< " snapRange=" << snapRange
+								<< " factor=" << factor
+								<< " attack=" << oldAttackScore << "->" << attackScore;
+						}
+					}
 					me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
 					if (pu->getPrevNode() && !isPositionVisibleToEnemy(pu->getPrevNode()->getPosition()))
 						currLastStepCost = pu->getTUCost(false).time - pu->getPrevNode()->getTUCost(false).time;
@@ -5165,16 +5203,44 @@ float AIModule::brutalExtendedFireModeChoice(BattleActionCost &costAuto, BattleA
 		testAction.type = i;
 		float newScore = brutalScoreFiringMode(&testAction, _aggroTarget, checkLOF);
 		// Pandi: DynamicTraits Suppressor favors volume-of-fire modes in Brutal AI.
-		if (_unit->isSuppressorRuntime() && (i == BA_AUTOSHOT || i == BA_AKIMBOSHOT))
+		// Uzi-like weapons may have both a medium snap-burst and a full auto dump,
+		// so snapshot gets a smaller boost too. If a score is negative, multiplying
+		// would make it worse; divide instead to move it closer to zero.
+		const float rawScore = newScore;
+		float suppressorFactor = 1.0f;
+		if (_unit->isSuppressorRuntime())
 		{
-			const float oldScore = newScore;
-			newScore *= 1.25f;
-			if (_traceAI)
+			if (i == BA_AUTOSHOT)
 			{
-				Log(LOG_INFO) << "[TRAIT] SUPPRESSOR fire mode boost unit=" << _unit->getId()
-					<< " mode=" << (int)i
-					<< " score=" << oldScore << "->" << newScore;
+				suppressorFactor = 1.35f;
 			}
+			else if (i == BA_AKIMBOSHOT)
+			{
+				suppressorFactor = 1.25f;
+			}
+			else if (i == BA_SNAPSHOT)
+			{
+				suppressorFactor = 1.15f;
+			}
+			if (suppressorFactor != 1.0f)
+			{
+				if (newScore >= 0)
+				{
+					newScore *= suppressorFactor;
+				}
+				else
+				{
+					newScore /= suppressorFactor;
+				}
+			}
+		}
+		if (_traceAI)
+		{
+			Log(LOG_INFO) << "[TRAIT] FIREMODE eval unit=" << _unit->getId()
+				<< " mode=" << (int)i
+				<< " raw=" << rawScore
+				<< " final=" << newScore
+				<< " suppressorFactor=" << suppressorFactor;
 		}
 
 		if (newScore > score)
