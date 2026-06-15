@@ -4154,6 +4154,58 @@ void AIModule::brutalThink(BattleAction* action)
 								bestFlankerAttackPosition = pos;
 							}
 					}
+					// Pandi: DynamicTraits Sneaky must influence final attack positions,
+					// not only the route to an already chosen tile. This is especially
+					// important for melee: prefer side/rear attack tiles and avoid tiles
+					// visible to enemies, so a sneaky katana user tries to stab through a
+					// flank/window instead of charging straight into reaction range.
+					if (_unit->isSneakyRuntime() && attackScore > 0)
+					{
+						bool visibleToEnemy = isPositionVisibleToEnemy(pos, true);
+						float factor = visibleToEnemy ? 0.70f : 1.05f;
+						int sideForLog = -1;
+						if (IAmPureMelee && highestDamageTarget)
+						{
+							const UnitSide side = getSideFacingToPosition(highestDamageTarget, pos);
+							sideForLog = (int)side;
+							switch (side)
+							{
+							case SIDE_REAR:
+								factor *= 1.70f;
+								break;
+							case SIDE_LEFT_REAR:
+							case SIDE_RIGHT_REAR:
+								factor *= 1.55f;
+								break;
+							case SIDE_LEFT:
+							case SIDE_RIGHT:
+								factor *= 1.40f;
+								break;
+							case SIDE_LEFT_FRONT:
+							case SIDE_RIGHT_FRONT:
+								factor *= 0.60f;
+								break;
+							case SIDE_FRONT:
+								factor *= 0.35f;
+								break;
+							default:
+								break;
+							}
+						}
+						const float oldAttackScore = attackScore;
+						attackScore *= factor;
+						me.attackPotential *= factor;
+						if (_traceAI && factor != 1.0f)
+						{
+							Log(LOG_INFO) << "[TRAIT] SNEAKY position bias unit=" << _unit->getId()
+								<< " pos=" << pos
+								<< " visibleToEnemy=" << (visibleToEnemy ? 1 : 0)
+								<< " pureMelee=" << (IAmPureMelee ? 1 : 0)
+								<< " side=" << sideForLog
+								<< " factor=" << factor
+								<< " attack=" << oldAttackScore << "->" << attackScore;
+						}
+					}
 					me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
 					if (pu->getPrevNode() && !isPositionVisibleToEnemy(pu->getPrevNode()->getPosition()))
 						currLastStepCost = pu->getTUCost(false).time - pu->getPrevNode()->getTUCost(false).time;
