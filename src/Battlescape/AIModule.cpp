@@ -3822,6 +3822,9 @@ void AIModule::brutalThink(BattleAction* action)
 			}
 			viewDistance = std::min(viewDistance, (float)(_save->getMod()->getMaxViewDistance() / (1.0 + maxSmoke / 3.0)));
 			float highestDamage = 0;
+			// Pandi: remember which target produced highestDamage so DynamicTraits
+			// Flanker can prefer attack positions that hit side/rear angles.
+			BattleUnit* highestDamageTarget = nullptr;
 			bool specialDoorCase = false;
 			for (BattleUnit* unit : *(_save->getUnits()))
 			{
@@ -3877,6 +3880,7 @@ void AIModule::brutalThink(BattleAction* action)
 					if (currentDamagePotential > highestDamage)
 					{
 						highestDamage = currentDamagePotential;
+						highestDamageTarget = unit;
 						currentAttackDirection = unitPosition;
 					}
 					if (!IAmPureMelee)
@@ -4053,6 +4057,76 @@ void AIModule::brutalThink(BattleAction* action)
 								<< " snapRange=" << snapRange
 								<< " autoBursts=" << autoBursts
 								<< " snapBursts=" << snapBursts
+								<< " factor=" << factor
+								<< " attack=" << oldAttackScore << "->" << attackScore;
+						}
+					}
+					// Pandi: DynamicTraits Flanker must also affect actual attack positions.
+					// The previous implementation only boosted indirect-peek scores, but Brutal
+					// prioritizes bestAttackPosition whenever a direct attack is available.
+					if (_unit->isFlankerRuntime() && attackScore > 0 && highestDamageTarget)
+					{
+						float sideFactor = 1.0f;
+						const UnitSide side = getSideFacingToPosition(highestDamageTarget, pos);
+						switch (side)
+						{
+						case SIDE_REAR:
+							sideFactor = 1.60f;
+							break;
+						case SIDE_LEFT_REAR:
+						case SIDE_RIGHT_REAR:
+							sideFactor = 1.45f;
+							break;
+						case SIDE_LEFT:
+						case SIDE_RIGHT:
+							sideFactor = 1.30f;
+							break;
+						case SIDE_LEFT_FRONT:
+						case SIDE_RIGHT_FRONT:
+							sideFactor = 1.15f;
+							break;
+						default:
+							break;
+						}
+
+						const double ax = static_cast<double>(myPos.x - targetPosition.x);
+						const double ay = static_cast<double>(myPos.y - targetPosition.y);
+						const double bx = static_cast<double>(pos.x - targetPosition.x);
+						const double by = static_cast<double>(pos.y - targetPosition.y);
+						const double lenA = std::sqrt(ax * ax + ay * ay);
+						const double lenB = std::sqrt(bx * bx + by * by);
+						double cosAngle = 1.0;
+						if (lenA > EPSILON && lenB > EPSILON)
+						{
+							cosAngle = (ax * bx + ay * by) / (lenA * lenB);
+						}
+						float angleFactor = 1.0f;
+						if (cosAngle < 0.0)
+						{
+							angleFactor = 1.45f;
+						}
+						else if (cosAngle < 0.50)
+						{
+							angleFactor = 1.30f;
+						}
+						else if (cosAngle < 0.866)
+						{
+							angleFactor = 1.15f;
+						}
+
+						const float factor = std::max(sideFactor, angleFactor);
+						const float oldAttackScore = attackScore;
+						attackScore *= factor;
+						me.attackPotential *= factor;
+						if (_traceAI && factor != 1.0f)
+						{
+							Log(LOG_INFO) << "[TRAIT] FLANKER attack bias unit=" << _unit->getId()
+								<< " pos=" << pos
+								<< " target=" << highestDamageTarget->getId()
+								<< " side=" << (int)side
+								<< " cosAngle=" << cosAngle
+								<< " sideFactor=" << sideFactor
+								<< " angleFactor=" << angleFactor
 								<< " factor=" << factor
 								<< " attack=" << oldAttackScore << "->" << attackScore;
 						}
