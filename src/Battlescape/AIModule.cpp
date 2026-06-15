@@ -3671,6 +3671,16 @@ void AIModule::brutalThink(BattleAction* action)
 	}
 	float bestAttackScore = 0;
 	Position bestAttackPosition = myPos;
+		// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
+		// strongest true flanking attack candidate separately from Brutal's normal
+		// bestAttackPosition so we can see whether a viable flank existed.
+		float bestFlankerAttackScore = 0;
+		float bestFlankerAttackRawScore = 0;
+		float bestFlankerAttackFactor = 1.0f;
+		double bestFlankerAttackCosAngle = 1.0;
+		int bestFlankerAttackSide = -1;
+		int bestFlankerAttackTargetId = -1;
+		Position bestFlankerAttackPosition = myPos;
 	float bestGreatCoverScore = 0;
 	Position bestGreatCoverPosition = myPos;
 	float bestGoodCoverScore = 0;
@@ -4130,6 +4140,19 @@ void AIModule::brutalThink(BattleAction* action)
 								<< " factor=" << factor
 								<< " attack=" << oldAttackScore << "->" << attackScore;
 						}
+							// Pandi: diagnostics only. Track true flank candidates (factor >= 1.3)
+							// so tests can tell whether the chosen non-flank position merely had a
+							// much stronger immediate attack score.
+							if (factor >= 1.30f && attackScore > bestFlankerAttackScore)
+							{
+								bestFlankerAttackScore = attackScore;
+								bestFlankerAttackRawScore = oldAttackScore;
+								bestFlankerAttackFactor = factor;
+								bestFlankerAttackCosAngle = cosAngle;
+								bestFlankerAttackSide = (int)side;
+								bestFlankerAttackTargetId = highestDamageTarget->getId();
+								bestFlankerAttackPosition = pos;
+							}
 					}
 					me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
 					if (pu->getPrevNode() && !isPositionVisibleToEnemy(pu->getPrevNode()->getPosition()))
@@ -4477,6 +4500,24 @@ void AIModule::brutalThink(BattleAction* action)
 			{
 				Log(LOG_INFO) << "bestAttackPosition: " << bestAttackPosition << " score: " << bestAttackScore;
 			}
+				if (_unit->isFlankerRuntime())
+				{
+					if (bestFlankerAttackScore > 0)
+					{
+						Log(LOG_INFO) << "[TRAIT] FLANKER best true attack candidate pos=" << bestFlankerAttackPosition
+							<< " score=" << bestFlankerAttackScore
+							<< " raw=" << bestFlankerAttackRawScore
+							<< " factor=" << bestFlankerAttackFactor
+							<< " side=" << bestFlankerAttackSide
+							<< " cosAngle=" << bestFlankerAttackCosAngle
+							<< " target=" << bestFlankerAttackTargetId
+							<< " ratioToBestAttack=" << (bestAttackScore > 0 ? bestFlankerAttackScore / bestAttackScore : 0.0f);
+					}
+					else
+					{
+						Log(LOG_INFO) << "[TRAIT] FLANKER best true attack candidate: none";
+					}
+				}
 			if (bestDirectPeakScore > 0)
 			{
 				Log(LOG_INFO) << "bestDirectPeakPosition: " << bestDirectPeakPosition << " score: " << bestDirectPeakScore;
