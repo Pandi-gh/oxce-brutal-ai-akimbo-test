@@ -272,6 +272,9 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 	int sneakVisibleChecks = 0;
 	int sneakPenaltyApplied = 0;
 	int sneakPenaltyVisibleSum = 0;
+	int sneakVisiblePositive = 0;
+	int sneakVisibleZero = 0;
+	int sneakVisibleNegative = 0;
 	// if the open list is empty, we've reached the end
 	while (!openList.empty())
 	{
@@ -294,6 +297,9 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 					<< " checks=" << sneakVisibleChecks
 					<< " penaltyApplied=" << sneakPenaltyApplied
 					<< " visibleSum=" << sneakPenaltyVisibleSum
+					<< " positive=" << sneakVisiblePositive
+					<< " zero=" << sneakVisibleZero
+					<< " negative=" << sneakVisibleNegative
 					<< " steps=" << _path.size()
 					<< " finalTU=" << currentNode->getTUCost(missile).time
 					<< " finalEnergy=" << currentNode->getTUCost(missile).energy;
@@ -317,8 +323,17 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 				sneakPenaltyVisibleSum += visible;
 				if (visible > 0)
 				{
+					++sneakVisiblePositive;
 					r.cost.time *= 2; // avoid being seen
 					++sneakPenaltyApplied;
+				}
+				else if (visible == 0)
+				{
+					++sneakVisibleZero;
+				}
+				else
+				{
+					++sneakVisibleNegative;
 				}
 			}
 			PathfindingNode *nextNode = getNode(nextPos);
@@ -341,6 +356,9 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 			<< " checks=" << sneakVisibleChecks
 			<< " penaltyApplied=" << sneakPenaltyApplied
 			<< " visibleSum=" << sneakPenaltyVisibleSum
+			<< " positive=" << sneakVisiblePositive
+			<< " zero=" << sneakVisibleZero
+			<< " negative=" << sneakVisibleNegative
 			<< " steps=0";
 	}
 	return false;
