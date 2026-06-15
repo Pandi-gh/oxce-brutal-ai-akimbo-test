@@ -26,6 +26,7 @@
 #include "../Mod/Mod.h"
 #include "../Savegame/BattleUnit.h"
 #include "../Engine/Options.h"
+#include "../Engine/Logger.h"
 #include "../fmath.h"
 #include "BattlescapeGame.h"
 
@@ -128,6 +129,26 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	bool sneak = (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
 		|| ((dynMixed || dynTraits) && unit->isSneakyRuntime());
 
+	// Pandi: Sneaky diagnostics. This helps verify whether debug/open-map FOV
+	// makes all candidate tiles visible and therefore neutralizes Sneaky routing.
+	if (Options::traceAI && (sneak || unit->isSneakyRuntime()))
+	{
+		Tile* startTile = _save->getTile(startPosition);
+		Tile* endTile = _save->getTile(endPosition);
+		Log(LOG_INFO) << "[TRAIT] SNEAKY path start unit=" << unit->getId()
+			<< " type=" << unit->getType()
+			<< " from=" << startPosition
+			<< " to=" << endPosition
+			<< " sneak=" << (sneak ? 1 : 0)
+			<< " dynMixed=" << (dynMixed ? 1 : 0)
+			<< " dynTraits=" << (dynTraits ? 1 : 0)
+			<< " runtime=" << (unit->isSneakyRuntime() ? 1 : 0)
+			<< " bam=" << (int)bam
+			<< " startVisible=" << (startTile ? startTile->getVisible() : -999)
+			<< " endVisible=" << (endTile ? endTile->getVisible() : -999)
+			<< " maxTUCost=" << maxTUCost;
+	}
+
 	auto movementType = getMovementType(unit, missileTarget, bam);
 	if (missileTarget != 0 && maxTUCost == -1 && bam == BAM_MISSILE) // pathfinding for missile
 	{
@@ -194,6 +215,11 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	if (!unit->isBrutal() && bresenhamPath(startPosition, endPosition, bam, missileTarget, sneak))
 	{
 		std::reverse(_path.begin(), _path.end()); // paths are stored in reverse order
+		if (Options::traceAI && (sneak || unit->isSneakyRuntime()))
+		{
+			Log(LOG_INFO) << "[TRAIT] SNEAKY path result unit=" << unit->getId()
+				<< " method=bresenham success=1 steps=" << _path.size();
+		}
 		return;
 	}
 	else
@@ -201,9 +227,18 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 		abortPath(); // if bresenham failed, we shouldn't keep the path it was attempting, in case A* fails too.
 	}
 	// Now try through A*.
-	if (!aStarPath(startPosition, endPosition, bam, missileTarget, sneak, maxTUCost))
+	const bool aStarSuccess = aStarPath(startPosition, endPosition, bam, missileTarget, sneak, maxTUCost);
+	if (!aStarSuccess)
 	{
 		abortPath();
+	}
+	if (Options::traceAI && (sneak || unit->isSneakyRuntime()))
+	{
+		Log(LOG_INFO) << "[TRAIT] SNEAKY path result unit=" << unit->getId()
+			<< " method=astar success=" << (aStarSuccess ? 1 : 0)
+			<< " steps=" << _path.size()
+			<< " totalTU=" << _totalTUCost.time
+			<< " totalEnergy=" << _totalTUCost.energy;
 	}
 }
 
@@ -232,6 +267,11 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 	PathfindingOpenSet openList;
 	openList.push(start);
 	bool missile = (bam == BAM_MISSILE);
+	// Pandi: Sneaky diagnostics counters for A*. `checks` counts visible-tile
+	// tests, `applied` counts nodes whose TU cost was doubled by Sneaky.
+	int sneakVisibleChecks = 0;
+	int sneakPenaltyApplied = 0;
+	int sneakPenaltyVisibleSum = 0;
 	// if the open list is empty, we've reached the end
 	while (!openList.empty())
 	{
@@ -247,6 +287,17 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 				_path.push_back(pf->getPrevDir());
 				pf = pf->getPrevNode();
 			}
+			if (Options::traceAI && (sneak || (_unit && _unit->isSneakyRuntime())))
+			{
+				Log(LOG_INFO) << "[TRAIT] SNEAKY astar summary unit=" << (_unit ? _unit->getId() : -1)
+					<< " success=1"
+					<< " checks=" << sneakVisibleChecks
+					<< " penaltyApplied=" << sneakPenaltyApplied
+					<< " visibleSum=" << sneakPenaltyVisibleSum
+					<< " steps=" << _path.size()
+					<< " finalTU=" << currentNode->getTUCost(missile).time
+					<< " finalEnergy=" << currentNode->getTUCost(missile).energy;
+			}
 			return true;
 		}
 
@@ -258,7 +309,18 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 				continue;
 
 			Position nextPos = r.pos;
-			if (sneak && _save->getTile(nextPos)->getVisible()) r.cost.time *= 2; // avoid being seen
+			if (sneak)
+			{
+				Tile* nextTile = _save->getTile(nextPos);
+				const int visible = nextTile ? nextTile->getVisible() : 0;
+				++sneakVisibleChecks;
+				sneakPenaltyVisibleSum += visible;
+				if (visible > 0)
+				{
+					r.cost.time *= 2; // avoid being seen
+					++sneakPenaltyApplied;
+				}
+			}
 			PathfindingNode *nextNode = getNode(nextPos);
 			if (nextNode->isChecked()) // Our algorithm means this node is already at minimum cost.
 				continue;
@@ -272,6 +334,15 @@ bool Pathfinding::aStarPath(Position startPosition, Position endPosition, Battle
 		}
 	}
 	// Unable to reach the target
+	if (Options::traceAI && (sneak || (_unit && _unit->isSneakyRuntime())))
+	{
+		Log(LOG_INFO) << "[TRAIT] SNEAKY astar summary unit=" << (_unit ? _unit->getId() : -1)
+			<< " success=0"
+			<< " checks=" << sneakVisibleChecks
+			<< " penaltyApplied=" << sneakPenaltyApplied
+			<< " visibleSum=" << sneakPenaltyVisibleSum
+			<< " steps=0";
+	}
 	return false;
 }
 
@@ -1464,7 +1535,16 @@ bool Pathfinding::bresenhamPath(Position origin, Position target, BattleActionMo
 			nextPoint = r.pos;
 			auto tuCost = r.cost.time + r.penalty.time;
 
-			if (sneak && _save->getTile(nextPoint)->getVisible()) return false;
+			if (sneak && _save->getTile(nextPoint)->getVisible())
+			{
+				if (Options::traceAI && (_unit && _unit->isSneakyRuntime()))
+				{
+					Log(LOG_INFO) << "[TRAIT] SNEAKY bresenham rejected visible tile unit=" << _unit->getId()
+						<< " pos=" << nextPoint
+						<< " visible=" << _save->getTile(nextPoint)->getVisible();
+				}
+				return false;
+			}
 
 			// delete the following
 			bool isDiagonal = (dir&1);
