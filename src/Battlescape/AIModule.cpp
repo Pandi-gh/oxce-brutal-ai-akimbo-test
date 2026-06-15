@@ -4631,7 +4631,32 @@ void AIModule::brutalThink(BattleAction* action)
 	if (bestAttackScore > 0 && haveTUToAttack)
 	{
 		_allowedToCheckAttack = true;
-		travelTarget = bestAttackPosition;
+		// Pandi: DynamicTraits Flanker is allowed to trade some immediate
+		// attackScore for a true side/rear angle. The candidate is collected
+		// only from factor>=1.30 positions, so this won't trigger on weak
+		// front-diagonal pseudo-flanks. Threshold chosen from test case where
+		// side flank was ~0.66 of normal bestAttack and should be preferred.
+		if (_unit->isFlankerRuntime()
+			&& bestFlankerAttackScore > 0
+			&& bestFlankerAttackScore >= bestAttackScore * 0.60f)
+		{
+			travelTarget = bestFlankerAttackPosition;
+			if (_traceAI)
+			{
+				Log(LOG_INFO) << "[TRAIT] FLANKER override attack position unit=" << _unit->getId()
+					<< " normal=" << bestAttackPosition
+					<< " normalScore=" << bestAttackScore
+					<< " flank=" << bestFlankerAttackPosition
+					<< " flankScore=" << bestFlankerAttackScore
+					<< " ratio=" << (bestAttackScore > 0 ? bestFlankerAttackScore / bestAttackScore : 0.0f)
+					<< " side=" << bestFlankerAttackSide
+					<< " cosAngle=" << bestFlankerAttackCosAngle;
+			}
+		}
+		else
+		{
+			travelTarget = bestAttackPosition;
+		}
 	}
 	else if (bestDirectPeakScore > 0 && newVisibleTilesDirect > 0 && haveTUToAttack)
 	{
