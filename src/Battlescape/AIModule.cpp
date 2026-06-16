@@ -4690,24 +4690,65 @@ void AIModule::brutalThink(BattleAction* action)
 			}
 		}
 	}
-	if (_unit->isSneakyRuntime() && IAmPureMelee
-		&& bestAttackScore > 0 && bestAttackPositionVisibleToEnemy
-		&& bestIndirectPeakScore > 0 && newVisibleTilesInDirect <= std::max(2, newVisibleTilesDirect / 2))
+	bool sneakyMeleeApproachOverride = false;
+	Position sneakyMeleeApproachPosition = myPos;
+	const char* sneakyMeleeApproachKind = "none";
+	int sneakyMeleeApproachVisibleTiles = 0;
+	float sneakyMeleeApproachScore = 0.0f;
+	if (_unit->isSneakyRuntime() && IAmPureMelee)
 	{
-		// Pandi: Sneaky melee stealth approach. If the immediate melee tile is
-		// visible/reaction-bait and an indirect approach exposes far fewer tiles,
-		// approach through the stealthy tile first instead of charging straight in.
-		travelTarget = bestIndirectPeakPosition;
-		indirectPeek = true;
+		const bool indirectMuchSafer = bestIndirectPeakScore > 0
+			&& newVisibleTilesInDirect <= std::max(2, newVisibleTilesDirect / 2);
+		const bool directVeryQuiet = bestDirectPeakScore > 0 && newVisibleTilesDirect <= 2;
+
+		// Pandi: if there is no immediate melee attack yet, Sneaky melee should
+		// prefer the quieter approach tile instead of a direct visible peak.
+		if (bestAttackScore <= 0 && indirectMuchSafer)
+		{
+			sneakyMeleeApproachOverride = true;
+			sneakyMeleeApproachPosition = bestIndirectPeakPosition;
+			sneakyMeleeApproachKind = "indirect-no-attack";
+			sneakyMeleeApproachVisibleTiles = newVisibleTilesInDirect;
+			sneakyMeleeApproachScore = bestIndirectPeakScore;
+		}
+		else if (bestAttackScore > 0 && bestAttackPositionVisibleToEnemy)
+		{
+			// Pandi: if the immediate melee tile is visible/reaction-bait, choose
+			// the quietest approach option that exists before committing to melee.
+			if (indirectMuchSafer)
+			{
+				sneakyMeleeApproachOverride = true;
+				sneakyMeleeApproachPosition = bestIndirectPeakPosition;
+				sneakyMeleeApproachKind = "indirect-before-visible-attack";
+				sneakyMeleeApproachVisibleTiles = newVisibleTilesInDirect;
+				sneakyMeleeApproachScore = bestIndirectPeakScore;
+			}
+			else if (directVeryQuiet)
+			{
+				sneakyMeleeApproachOverride = true;
+				sneakyMeleeApproachPosition = bestDirectPeakPosition;
+				sneakyMeleeApproachKind = "direct-before-visible-attack";
+				sneakyMeleeApproachVisibleTiles = newVisibleTilesDirect;
+				sneakyMeleeApproachScore = bestDirectPeakScore;
+			}
+		}
+	}
+	if (sneakyMeleeApproachOverride)
+	{
+		travelTarget = sneakyMeleeApproachPosition;
+		indirectPeek = (sneakyMeleeApproachPosition == bestIndirectPeakPosition);
 		if (_traceAI)
 		{
 			Log(LOG_INFO) << "[TRAIT] SNEAKY melee stealth approach override unit=" << _unit->getId()
+				<< " kind=" << sneakyMeleeApproachKind
 				<< " attack=" << bestAttackPosition
 				<< " attackScore=" << bestAttackScore
-				<< " indirect=" << bestIndirectPeakPosition
-				<< " indirectScore=" << bestIndirectPeakScore
+				<< " attackVisible=" << (bestAttackPositionVisibleToEnemy ? 1 : 0)
+				<< " approach=" << sneakyMeleeApproachPosition
+				<< " approachScore=" << sneakyMeleeApproachScore
 				<< " directVisibleTiles=" << newVisibleTilesDirect
-				<< " indirectVisibleTiles=" << newVisibleTilesInDirect;
+				<< " indirectVisibleTiles=" << newVisibleTilesInDirect
+				<< " approachVisibleTiles=" << sneakyMeleeApproachVisibleTiles;
 		}
 	}
 	else if (bestAttackScore > 0 && haveTUToAttack)
