@@ -4702,6 +4702,12 @@ void AIModule::brutalThink(BattleAction* action)
 	int sneakyMeleeAssaultSide = -1;
 	bool sneakyMeleeAssaultVisible = false;
 	BattleActionMove assaultMoveMode = BAM_NORMAL;
+		int assaultCandidatesChecked = 0;
+		int assaultRejectedInvalidTile = 0;
+		int assaultRejectedMeleeRange = 0;
+		int assaultRejectedFit = 0;
+		int assaultRejectedPath = 0;
+		int assaultRejectedTU = 0;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
