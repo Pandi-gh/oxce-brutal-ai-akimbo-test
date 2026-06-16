@@ -285,6 +285,8 @@ public:
 	std::vector<PathfindingNode*> findReachablePathFindingNodes(BattleUnit *unit, const BattleActionCost &cost, bool &ranOutOfTus, bool entireMap = false, const BattleUnit* missileTarget = NULL, const Position* alternateStart = NULL, bool justCheckIfAnyMovementIsPossible = false, bool useMaxTUs = false, BattleActionMove bam = BAM_NORMAL);
 	/// Gets _totalTUCost; finds out whether we can hike somewhere in this turn or not.
 	int getTotalTUCost() const { return _totalTUCost.time; }
+	/// Pandi: Gets energy part of _totalTUCost; needed for DynamicTraits planning.
+	int getTotalEnergyCost() const { return _totalTUCost.energy; }
 	/// Gets the path preview setting.
 	bool isPathPreviewed() const;
 	/// Gets the modifier setting.
