@@ -4777,82 +4777,58 @@ void AIModule::brutalThink(BattleAction* action)
 								}
 								continue;
 							}
-								// Pandi: Sneaky assault tries walking first to preserve stamina. If
-								// walking cannot complete the full move+hit plan in this turn, it may
-								// fall back to running, but only if the resulting plan also fits energy.
-								int assaultMoveTU = -1;
-								int assaultMoveEnergy = -1;
-								BattleActionMove candidateMoveMode = BAM_NORMAL;
-								bool candidatePathFound = false;
-
-								_save->getPathfinding()->calculate(_unit, candidate, BAM_NORMAL, 0, maxMoveTU);
-								if (_save->getPathfinding()->getStartDirection() != -1)
+							// Pandi: Use the same stamina/TU balance heuristic as Brutal AI movement:
+							// wantToRun() decides RUN only when Energy/TU ratio is good enough;
+							// otherwise plan walking. Then verify the full move+hit plan fits both
+							// time units and energy.
+							_save->getPathfinding()->calculate(_unit, candidate, assaultMoveMode, 0, maxMoveTU);
+							if (_save->getPathfinding()->getStartDirection() == -1)
+							{
+								++assaultRejectedPath;
+								if (_traceAI)
 								{
-									assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
-									assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
-									candidatePathFound = true;
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=noPath"
+										<< " moveMode=" << (int)assaultMoveMode
+										<< " maxMoveTU=" << maxMoveTU;
 								}
 								_save->getPathfinding()->abortPath();
-
-								const bool normalFitsTU = candidatePathFound && assaultMoveTU + hitTU <= _unit->getTimeUnits();
-								const bool normalFitsEnergy = candidatePathFound && assaultMoveEnergy + hitEnergy <= _unit->getEnergy();
-								if ((!candidatePathFound || !normalFitsTU) && wantToRun())
+								continue;
+							}
+							const int assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
+							const int assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
+							_save->getPathfinding()->abortPath();
+							if (assaultMoveTU + hitTU > _unit->getTimeUnits())
+							{
+								++assaultRejectedTU;
+								if (_traceAI)
 								{
-									_save->getPathfinding()->calculate(_unit, candidate, BAM_RUN, 0, maxMoveTU);
-									if (_save->getPathfinding()->getStartDirection() != -1)
-									{
-										assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
-										assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
-										candidateMoveMode = BAM_RUN;
-										candidatePathFound = true;
-									}
-									_save->getPathfinding()->abortPath();
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=noTU"
+										<< " moveTU=" << assaultMoveTU
+										<< " hitTU=" << hitTU
+										<< " currentTU=" << _unit->getTimeUnits()
+										<< " moveMode=" << (int)assaultMoveMode;
 								}
-
-								if (!candidatePathFound)
+								continue;
+							}
+							if (assaultMoveEnergy + hitEnergy > _unit->getEnergy())
+							{
+								++assaultRejectedEnergy;
+								if (_traceAI)
 								{
-									++assaultRejectedPath;
-									if (_traceAI)
-									{
-										Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-											<< " pos=" << candidate
-											<< " reason=noPath"
-											<< " triedRun=" << (wantToRun() ? 1 : 0)
-											<< " maxMoveTU=" << maxMoveTU;
-									}
-									continue;
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=noEnergy"
+										<< " moveEnergy=" << assaultMoveEnergy
+										<< " hitEnergy=" << hitEnergy
+										<< " currentEnergy=" << _unit->getEnergy()
+										<< " moveMode=" << (int)assaultMoveMode;
 								}
-								if (assaultMoveTU + hitTU > _unit->getTimeUnits())
-								{
-									++assaultRejectedTU;
-									if (_traceAI)
-									{
-										Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-											<< " pos=" << candidate
-											<< " reason=noTU"
-											<< " moveTU=" << assaultMoveTU
-											<< " hitTU=" << hitTU
-											<< " currentTU=" << _unit->getTimeUnits()
-											<< " moveMode=" << (int)candidateMoveMode;
-									}
-									continue;
-								}
-								if (assaultMoveEnergy + hitEnergy > _unit->getEnergy())
-								{
-									++assaultRejectedEnergy;
-									if (_traceAI)
-									{
-										Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-											<< " pos=" << candidate
-											<< " reason=noEnergy"
-											<< " moveEnergy=" << assaultMoveEnergy
-											<< " hitEnergy=" << hitEnergy
-											<< " currentEnergy=" << _unit->getEnergy()
-											<< " moveMode=" << (int)candidateMoveMode;
-									}
-									continue;
-								}
-
+								continue;
+							}
 
 							// Pandi: TileEngine::validMeleeRange uses the attacker's actual
 							// position for voxel origins. Temporarily move the unit to the
@@ -4950,63 +4926,6 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
-	bool sneakyMeleeApproachOverride = false;
-	Position sneakyMeleeApproachPosition = myPos;
-	const char* sneakyMeleeApproachKind = "none";
-	int sneakyMeleeApproachVisibleTiles = 0;
-	float sneakyMeleeApproachScore = 0.0f;
-	if (false && _unit->isSneakyRuntime() && IAmPureMelee)
-	{
-		const bool indirectMuchSafer = bestIndirectPeakScore > 0
-			&& newVisibleTilesInDirect <= std::max(2, newVisibleTilesDirect / 2);
-		const bool directVeryQuiet = bestDirectPeakScore > 0 && newVisibleTilesDirect <= 2;
-		const bool goodCoverAvailable = bestGoodCoverScore > 0;
-		const bool greatCoverAvailable = bestGreatCoverScore > 0;
-
-		// Pandi: if there is no immediate melee attack yet, Sneaky melee should
-		// prefer the quieter approach tile instead of a direct visible peak.
-		if (bestAttackScore <= 0 && indirectMuchSafer)
-		{
-			sneakyMeleeApproachOverride = true;
-			sneakyMeleeApproachPosition = bestIndirectPeakPosition;
-			sneakyMeleeApproachKind = "indirect-no-attack";
-			sneakyMeleeApproachVisibleTiles = newVisibleTilesInDirect;
-			sneakyMeleeApproachScore = bestIndirectPeakScore;
-		}
-		else if (bestAttackScore > 0 && bestAttackPositionVisibleToEnemy)
-		{
-			// Pandi: if the immediate melee tile is visible/reaction-bait, choose
-			// the quietest approach option that exists before committing to melee.
-			if (indirectMuchSafer)
-			{
-				sneakyMeleeApproachOverride = true;
-				sneakyMeleeApproachPosition = bestIndirectPeakPosition;
-				sneakyMeleeApproachKind = "indirect-before-visible-attack";
-				sneakyMeleeApproachVisibleTiles = newVisibleTilesInDirect;
-				sneakyMeleeApproachScore = bestIndirectPeakScore;
-			}
-			else if (directVeryQuiet)
-			{
-				sneakyMeleeApproachOverride = true;
-				sneakyMeleeApproachPosition = bestDirectPeakPosition;
-				sneakyMeleeApproachKind = "direct-before-visible-attack";
-				sneakyMeleeApproachVisibleTiles = newVisibleTilesDirect;
-				sneakyMeleeApproachScore = bestDirectPeakScore;
-			}
-			else
-			{
-				// Pandi: last-resort Sneaky melee restraint. If every immediate melee
-				// attack tile is visible/reaction-bait and no quiet approach exists,
-				// do NOT sprint to unrelated cover across the open and do NOT charge.
-				// Hold the current staging tile and wait for a better opening.
-				sneakyMeleeApproachOverride = true;
-				sneakyMeleeApproachPosition = myPos;
-				sneakyMeleeApproachKind = "hold-before-visible-attack";
-				sneakyMeleeApproachVisibleTiles = 0;
-				sneakyMeleeApproachScore = 0;
-			}
-		}
-	}
 	if (sneakyMeleeAssaultOverride)
 	{
 		travelTarget = sneakyMeleeAssaultPosition;
@@ -5021,28 +4940,6 @@ void AIModule::brutalThink(BattleAction* action)
 				<< " hitTU=" << sneakyMeleeAssaultHitTU
 				<< " side=" << sneakyMeleeAssaultSide
 				<< " visible=" << (sneakyMeleeAssaultVisible ? 1 : 0);
-		}
-	}
-	else if (sneakyMeleeApproachOverride)
-	{
-		travelTarget = sneakyMeleeApproachPosition;
-		indirectPeek = (sneakyMeleeApproachPosition == bestIndirectPeakPosition);
-		// Pandi: this is a staging decision, not a commit-to-kill decision. Stop
-		// after reaching the stealth approach tile; otherwise the same unit may
-		// immediately continue into the visible reaction-bait melee tile.
-		shouldEndTurnAfterMove = true;
-		if (_traceAI)
-		{
-			Log(LOG_INFO) << "[TRAIT] SNEAKY melee stealth approach override unit=" << _unit->getId()
-				<< " kind=" << sneakyMeleeApproachKind
-				<< " attack=" << bestAttackPosition
-				<< " attackScore=" << bestAttackScore
-				<< " attackVisible=" << (bestAttackPositionVisibleToEnemy ? 1 : 0)
-				<< " approach=" << sneakyMeleeApproachPosition
-				<< " approachScore=" << sneakyMeleeApproachScore
-				<< " directVisibleTiles=" << newVisibleTilesDirect
-				<< " indirectVisibleTiles=" << newVisibleTilesInDirect
-				<< " approachVisibleTiles=" << sneakyMeleeApproachVisibleTiles;
 		}
 	}
 	else if (bestAttackScore > 0 && haveTUToAttack)
