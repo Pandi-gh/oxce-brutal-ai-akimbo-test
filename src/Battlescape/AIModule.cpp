@@ -4162,31 +4162,37 @@ void AIModule::brutalThink(BattleAction* action)
 					if (_unit->isSneakyRuntime() && attackScore > 0)
 					{
 						bool visibleToEnemy = isPositionVisibleToEnemy(pos, true);
-						float factor = visibleToEnemy ? 0.70f : 1.05f;
+						// Pandi: for sneaky melee, being visible while entering the attack
+						// tile is the main danger (reaction bait), so the visibility penalty
+						// must dominate. Ranged sneaky keeps a softer visibility penalty.
+						float factor = visibleToEnemy ? (IAmPureMelee ? 0.25f : 0.70f) : (IAmPureMelee ? 1.10f : 1.05f);
 						int sideForLog = -1;
 						if (IAmPureMelee && highestDamageTarget)
 						{
 							const UnitSide side = getSideFacingToPosition(highestDamageTarget, pos);
 							sideForLog = (int)side;
+							// Pandi: for Sneaky melee prefer true side/window attacks over
+							// simply running around to the rear in the open. Rear is still good,
+							// but side gets the strongest multiplier for this trait.
 							switch (side)
 							{
-							case SIDE_REAR:
-								factor *= 1.70f;
+							case SIDE_LEFT:
+							case SIDE_RIGHT:
+								factor *= 1.60f;
 								break;
 							case SIDE_LEFT_REAR:
 							case SIDE_RIGHT_REAR:
-								factor *= 1.55f;
-								break;
-							case SIDE_LEFT:
-							case SIDE_RIGHT:
 								factor *= 1.40f;
+								break;
+							case SIDE_REAR:
+								factor *= 1.20f;
 								break;
 							case SIDE_LEFT_FRONT:
 							case SIDE_RIGHT_FRONT:
-								factor *= 0.60f;
+								factor *= 0.35f;
 								break;
 							case SIDE_FRONT:
-								factor *= 0.35f;
+								factor *= 0.20f;
 								break;
 							default:
 								break;
