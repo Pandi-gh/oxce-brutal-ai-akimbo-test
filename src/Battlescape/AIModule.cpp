@@ -4703,7 +4703,28 @@ void AIModule::brutalThink(BattleAction* action)
 	bool sneakyMeleeAssaultVisible = false;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
+		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
+		// does not necessarily return a katana held in hand, which made the whole
+		// one-turn assault search silently skip candidates.
 		BattleItem* meleeWeapon = _unit->getUtilityWeapon(BT_MELEE);
+		if (!meleeWeapon && _attackAction.weapon && _attackAction.weapon->getRules()->getBattleType() == BT_MELEE)
+		{
+			meleeWeapon = _attackAction.weapon;
+		}
+		if (!meleeWeapon)
+		{
+			BattleItem* mainHand = _unit->getMainHandWeapon(false);
+			if (mainHand && mainHand->getRules()->getBattleType() == BT_MELEE)
+			{
+				meleeWeapon = mainHand;
+			}
+		}
+		if (_traceAI)
+		{
+			Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE assault search unit=" << _unit->getId()
+				<< " target=" << unitToWalkTo->getId()
+				<< " weapon=" << (meleeWeapon ? meleeWeapon->getRules()->getName() : std::string("NONE"));
+		}
 		if (meleeWeapon)
 		{
 			const int hitTU = _unit->getActionTUs(BA_HIT, meleeWeapon).Time;
