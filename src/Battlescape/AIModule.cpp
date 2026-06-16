@@ -4508,6 +4508,7 @@ void AIModule::brutalThink(BattleAction* action)
 			{
 				bestAttackScore = attackScore;
 				bestAttackPosition = pos;
+				bestAttackPositionVisibleToEnemy = isPositionVisibleToEnemy(pos, true);
 				shouldHaveLofAfterMove = realLineOfFire;
 				winnerWasSpecialDoorCase = specialDoorCase;
 				lastStepCost = currLastStepCost;
@@ -4686,7 +4687,27 @@ void AIModule::brutalThink(BattleAction* action)
 			}
 		}
 	}
-	if (bestAttackScore > 0 && haveTUToAttack)
+	if (_unit->isSneakyRuntime() && IAmPureMelee
+		&& bestAttackScore > 0 && bestAttackPositionVisibleToEnemy
+		&& bestIndirectPeakScore > 0 && newVisibleTilesInDirect <= std::max(2, newVisibleTilesDirect / 2))
+	{
+		// Pandi: Sneaky melee stealth approach. If the immediate melee tile is
+		// visible/reaction-bait and an indirect approach exposes far fewer tiles,
+		// approach through the stealthy tile first instead of charging straight in.
+		travelTarget = bestIndirectPeakPosition;
+		indirectPeek = true;
+		if (_traceAI)
+		{
+			Log(LOG_INFO) << "[TRAIT] SNEAKY melee stealth approach override unit=" << _unit->getId()
+				<< " attack=" << bestAttackPosition
+				<< " attackScore=" << bestAttackScore
+				<< " indirect=" << bestIndirectPeakPosition
+				<< " indirectScore=" << bestIndirectPeakScore
+				<< " directVisibleTiles=" << newVisibleTilesDirect
+				<< " indirectVisibleTiles=" << newVisibleTilesInDirect;
+		}
+	}
+	else if (bestAttackScore > 0 && haveTUToAttack)
 	{
 		_allowedToCheckAttack = true;
 		// Pandi: DynamicTraits Flanker is allowed to trade some immediate
