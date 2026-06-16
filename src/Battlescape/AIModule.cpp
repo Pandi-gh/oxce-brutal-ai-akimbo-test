@@ -4701,6 +4701,7 @@ void AIModule::brutalThink(BattleAction* action)
 	int sneakyMeleeAssaultHitTU = 0;
 	int sneakyMeleeAssaultSide = -1;
 	bool sneakyMeleeAssaultVisible = false;
+	BattleActionMove assaultMoveMode = BAM_NORMAL;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
@@ -4729,13 +4730,7 @@ void AIModule::brutalThink(BattleAction* action)
 		{
 			const int hitTU = _unit->getActionTUs(BA_HIT, meleeWeapon).Time;
 			const int maxMoveTU = std::max(0, _unit->getTimeUnits() - hitTU);
-				const BattleActionMove assaultMoveMode = wantToRun() ? BAM_RUN : BAM_NORMAL;
-				int assaultCandidatesChecked = 0;
-				int assaultRejectedInvalidTile = 0;
-				int assaultRejectedMeleeRange = 0;
-				int assaultRejectedFit = 0;
-				int assaultRejectedPath = 0;
-				int assaultRejectedTU = 0;
+				assaultMoveMode = wantToRun() ? BAM_RUN : BAM_NORMAL;
 			const int size = _unit->getArmor()->getSize();
 			const int sizeTarget = unitToWalkTo->getArmor()->getSize();
 			for (int z = -1; z <= 1; ++z)
