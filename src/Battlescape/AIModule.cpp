@@ -3671,16 +3671,19 @@ void AIModule::brutalThink(BattleAction* action)
 	}
 	float bestAttackScore = 0;
 	Position bestAttackPosition = myPos;
-		// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
-		// strongest true flanking attack candidate separately from Brutal's normal
-		// bestAttackPosition so we can see whether a viable flank existed.
-		float bestFlankerAttackScore = 0;
-		float bestFlankerAttackRawScore = 0;
-		float bestFlankerAttackFactor = 1.0f;
-		double bestFlankerAttackCosAngle = 1.0;
-		int bestFlankerAttackSide = -1;
-		int bestFlankerAttackTargetId = -1;
-		Position bestFlankerAttackPosition = myPos;
+	// Pandi: for Sneaky melee; immediate attack tiles visible to enemies
+	// should lose to low-visibility approach positions when possible.
+	bool bestAttackPositionVisibleToEnemy = false;
+	// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
+	// strongest true flanking attack candidate separately from Brutal's normal
+	// bestAttackPosition so we can see whether a viable flank existed.
+	float bestFlankerAttackScore = 0;
+	float bestFlankerAttackRawScore = 0;
+	float bestFlankerAttackFactor = 1.0f;
+	double bestFlankerAttackCosAngle = 1.0;
+	int bestFlankerAttackSide = -1;
+	int bestFlankerAttackTargetId = -1;
+	Position bestFlankerAttackPosition = myPos;
 	float bestGreatCoverScore = 0;
 	Position bestGreatCoverPosition = myPos;
 	float bestGoodCoverScore = 0;
