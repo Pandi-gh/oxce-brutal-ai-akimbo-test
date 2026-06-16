@@ -4745,24 +4745,80 @@ void AIModule::brutalThink(BattleAction* action)
 				{
 					for (int y = -size; y <= sizeTarget; ++y)
 					{
-						if (!x && !y) continue;
+							if (!x && !y) continue;
 							Position candidate = unitToWalkTo->getPosition() + Position(x, y, z);
 							++assaultCandidatesChecked;
 							Tile* candidateTile = _save->getTile(candidate);
-							if (!candidateTile || candidateTile->getDangerous()) { ++assaultRejectedInvalidTile; continue; }
+							if (!candidateTile || candidateTile->getDangerous())
+							{
+								++assaultRejectedInvalidTile;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=invalidTile"
+										<< " tileExists=" << (candidateTile ? 1 : 0)
+										<< " dangerous=" << (candidateTile && candidateTile->getDangerous() ? 1 : 0);
+								}
+								continue;
+							}
 							const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
-							if (!_save->getTileEngine()->validMeleeRange(candidate, dir, _unit, unitToWalkTo, 0)) { ++assaultRejectedMeleeRange; continue; }
-							if (!_save->setUnitPosition(_unit, candidate, true)) { ++assaultRejectedFit; continue; }
+							if (!_save->getTileEngine()->validMeleeRange(candidate, dir, _unit, unitToWalkTo, 0))
+							{
+								++assaultRejectedMeleeRange;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=badMeleeRange"
+										<< " dir=" << dir
+										<< " target=" << unitToWalkTo->getId()
+										<< " targetPos=" << unitToWalkTo->getPosition();
+								}
+								continue;
+							}
+							if (!_save->setUnitPosition(_unit, candidate, true))
+							{
+								++assaultRejectedFit;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=noFit";
+								}
+								continue;
+							}
 							_save->getPathfinding()->calculate(_unit, candidate, assaultMoveMode, 0, maxMoveTU);
 							if (_save->getPathfinding()->getStartDirection() == -1)
 							{
 								++assaultRejectedPath;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=noPath"
+										<< " moveMode=" << (int)assaultMoveMode
+										<< " maxMoveTU=" << maxMoveTU;
+								}
 								_save->getPathfinding()->abortPath();
 								continue;
 							}
 							const int moveTU = _save->getPathfinding()->getTotalTUCost();
 							_save->getPathfinding()->abortPath();
-							if (moveTU + hitTU > _unit->getTimeUnits()) { ++assaultRejectedTU; continue; }
+							if (moveTU + hitTU > _unit->getTimeUnits())
+							{
+								++assaultRejectedTU;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=noTU"
+										<< " moveTU=" << moveTU
+										<< " hitTU=" << hitTU
+										<< " currentTU=" << _unit->getTimeUnits();
+								}
+								continue;
+							}
 						const bool visible = isPositionVisibleToEnemy(candidate, true);
 						const UnitSide side = getSideFacingToPosition(unitToWalkTo, candidate);
 						float sideScore = 1.0f;
