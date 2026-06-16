@@ -4729,6 +4729,13 @@ void AIModule::brutalThink(BattleAction* action)
 		{
 			const int hitTU = _unit->getActionTUs(BA_HIT, meleeWeapon).Time;
 			const int maxMoveTU = std::max(0, _unit->getTimeUnits() - hitTU);
+				const BattleActionMove assaultMoveMode = wantToRun() ? BAM_RUN : BAM_NORMAL;
+				int assaultCandidatesChecked = 0;
+				int assaultRejectedInvalidTile = 0;
+				int assaultRejectedMeleeRange = 0;
+				int assaultRejectedFit = 0;
+				int assaultRejectedPath = 0;
+				int assaultRejectedTU = 0;
 			const int size = _unit->getArmor()->getSize();
 			const int sizeTarget = unitToWalkTo->getArmor()->getSize();
 			for (int z = -1; z <= 1; ++z)
@@ -4738,21 +4745,23 @@ void AIModule::brutalThink(BattleAction* action)
 					for (int y = -size; y <= sizeTarget; ++y)
 					{
 						if (!x && !y) continue;
-						Position candidate = unitToWalkTo->getPosition() + Position(x, y, z);
-						Tile* candidateTile = _save->getTile(candidate);
-						if (!candidateTile || candidateTile->getDangerous()) continue;
-						const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
-						if (!_save->getTileEngine()->validMeleeRange(candidate, dir, _unit, unitToWalkTo, 0)) continue;
-						if (!_save->setUnitPosition(_unit, candidate, true)) continue;
-						_save->getPathfinding()->calculate(_unit, candidate, BAM_NORMAL, 0, maxMoveTU);
-						if (_save->getPathfinding()->getStartDirection() == -1)
-						{
+							Position candidate = unitToWalkTo->getPosition() + Position(x, y, z);
+							++assaultCandidatesChecked;
+							Tile* candidateTile = _save->getTile(candidate);
+							if (!candidateTile || candidateTile->getDangerous()) { ++assaultRejectedInvalidTile; continue; }
+							const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
+							if (!_save->getTileEngine()->validMeleeRange(candidate, dir, _unit, unitToWalkTo, 0)) { ++assaultRejectedMeleeRange; continue; }
+							if (!_save->setUnitPosition(_unit, candidate, true)) { ++assaultRejectedFit; continue; }
+							_save->getPathfinding()->calculate(_unit, candidate, assaultMoveMode, 0, maxMoveTU);
+							if (_save->getPathfinding()->getStartDirection() == -1)
+							{
+								++assaultRejectedPath;
+								_save->getPathfinding()->abortPath();
+								continue;
+							}
+							const int moveTU = _save->getPathfinding()->getTotalTUCost();
 							_save->getPathfinding()->abortPath();
-							continue;
-						}
-						const int moveTU = _save->getPathfinding()->getTotalTUCost();
-						_save->getPathfinding()->abortPath();
-						if (moveTU + hitTU > _unit->getTimeUnits()) continue;
+							if (moveTU + hitTU > _unit->getTimeUnits()) { ++assaultRejectedTU; continue; }
 						const bool visible = isPositionVisibleToEnemy(candidate, true);
 						const UnitSide side = getSideFacingToPosition(unitToWalkTo, candidate);
 						float sideScore = 1.0f;
@@ -4789,6 +4798,7 @@ void AIModule::brutalThink(BattleAction* action)
 								<< " visible=" << (visible ? 1 : 0)
 								<< " moveTU=" << moveTU
 								<< " hitTU=" << hitTU
+									<< " moveMode=" << (int)assaultMoveMode
 								<< " score=" << score;
 						}
 						if (score > sneakyMeleeAssaultScore)
@@ -4807,12 +4817,24 @@ void AIModule::brutalThink(BattleAction* action)
 		}
 	}
 
+				if (_traceAI)
+				{
+					Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE assault search summary unit=" << _unit->getId()
+						<< " checked=" << assaultCandidatesChecked
+						<< " invalidTile=" << assaultRejectedInvalidTile
+						<< " badMeleeRange=" << assaultRejectedMeleeRange
+						<< " noFit=" << assaultRejectedFit
+						<< " noPath=" << assaultRejectedPath
+						<< " noTU=" << assaultRejectedTU
+						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
+						<< " moveMode=" << (int)assaultMoveMode;
+				}
 	bool sneakyMeleeApproachOverride = false;
 	Position sneakyMeleeApproachPosition = myPos;
 	const char* sneakyMeleeApproachKind = "none";
 	int sneakyMeleeApproachVisibleTiles = 0;
 	float sneakyMeleeApproachScore = 0.0f;
-	if (_unit->isSneakyRuntime() && IAmPureMelee)
+	if (false && _unit->isSneakyRuntime() && IAmPureMelee)
 	{
 		const bool indirectMuchSafer = bestIndirectPeakScore > 0
 			&& newVisibleTilesInDirect <= std::max(2, newVisibleTilesDirect / 2);
