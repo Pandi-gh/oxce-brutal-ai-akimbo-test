@@ -4700,6 +4700,8 @@ void AIModule::brutalThink(BattleAction* action)
 		const bool indirectMuchSafer = bestIndirectPeakScore > 0
 			&& newVisibleTilesInDirect <= std::max(2, newVisibleTilesDirect / 2);
 		const bool directVeryQuiet = bestDirectPeakScore > 0 && newVisibleTilesDirect <= 2;
+		const bool goodCoverAvailable = bestGoodCoverScore > 0;
+		const bool greatCoverAvailable = bestGreatCoverScore > 0;
 
 		// Pandi: if there is no immediate melee attack yet, Sneaky melee should
 		// prefer the quieter approach tile instead of a direct visible peak.
@@ -4730,6 +4732,25 @@ void AIModule::brutalThink(BattleAction* action)
 				sneakyMeleeApproachKind = "direct-before-visible-attack";
 				sneakyMeleeApproachVisibleTiles = newVisibleTilesDirect;
 				sneakyMeleeApproachScore = bestDirectPeakScore;
+			}
+			else if (goodCoverAvailable && bestGoodCoverScore >= bestAttackScore * 0.50f)
+			{
+				// Pandi: last-resort Sneaky melee restraint. If every immediate melee
+				// attack tile is visible/reaction-bait and no quiet peek exists, do not
+				// charge. Reposition to a good cover/staging tile instead.
+				sneakyMeleeApproachOverride = true;
+				sneakyMeleeApproachPosition = bestGoodCoverPosition;
+				sneakyMeleeApproachKind = "good-cover-before-visible-attack";
+				sneakyMeleeApproachVisibleTiles = -1;
+				sneakyMeleeApproachScore = bestGoodCoverScore;
+			}
+			else if (greatCoverAvailable && bestGreatCoverScore >= bestAttackScore * 0.25f)
+			{
+				sneakyMeleeApproachOverride = true;
+				sneakyMeleeApproachPosition = bestGreatCoverPosition;
+				sneakyMeleeApproachKind = "great-cover-before-visible-attack";
+				sneakyMeleeApproachVisibleTiles = -1;
+				sneakyMeleeApproachScore = bestGreatCoverScore;
 			}
 		}
 	}
