@@ -4702,12 +4702,14 @@ void AIModule::brutalThink(BattleAction* action)
 	int sneakyMeleeAssaultSide = -1;
 	bool sneakyMeleeAssaultVisible = false;
 	BattleActionMove assaultMoveMode = BAM_NORMAL;
+	bool sneakyMeleeAssaultDirectWalk = false;
 		int assaultCandidatesChecked = 0;
 		int assaultRejectedInvalidTile = 0;
 		int assaultRejectedMeleeRange = 0;
 		int assaultRejectedFit = 0;
 		int assaultRejectedPath = 0;
 		int assaultRejectedTU = 0;
+		int assaultRejectedEnergy = 0;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
@@ -4735,6 +4737,7 @@ void AIModule::brutalThink(BattleAction* action)
 		if (meleeWeapon)
 		{
 			const int hitTU = _unit->getActionTUs(BA_HIT, meleeWeapon).Time;
+				const int hitEnergy = _unit->getActionTUs(BA_HIT, meleeWeapon).Energy;
 			const int maxMoveTU = std::max(0, _unit->getTimeUnits() - hitTU);
 				assaultMoveMode = wantToRun() ? BAM_RUN : BAM_NORMAL;
 			const int size = _unit->getArmor()->getSize();
@@ -4789,6 +4792,7 @@ void AIModule::brutalThink(BattleAction* action)
 								continue;
 							}
 							const int assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
+								const int assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
 							_save->getPathfinding()->abortPath();
 							if (assaultMoveTU + hitTU > _unit->getTimeUnits())
 							{
@@ -4803,6 +4807,20 @@ void AIModule::brutalThink(BattleAction* action)
 										<< " currentTU=" << _unit->getTimeUnits();
 								}
 								continue;
+								if (assaultMoveEnergy + hitEnergy > _unit->getEnergy())
+								{
+									++assaultRejectedEnergy;
+									if (_traceAI)
+									{
+										Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+											<< " pos=" << candidate
+											<< " reason=noEnergy"
+											<< " moveEnergy=" << assaultMoveEnergy
+											<< " hitEnergy=" << hitEnergy
+											<< " currentEnergy=" << _unit->getEnergy();
+									}
+									continue;
+								}
 							}
 
 							// Pandi: TileEngine::validMeleeRange uses the attacker's actual
@@ -4866,7 +4884,9 @@ void AIModule::brutalThink(BattleAction* action)
 								<< " side=" << (int)side
 								<< " visible=" << (visible ? 1 : 0)
 								<< " moveTU=" << moveTU
+									<< " moveEnergy=" << assaultMoveEnergy
 								<< " hitTU=" << hitTU
+									<< " hitEnergy=" << hitEnergy
 									<< " moveMode=" << (int)assaultMoveMode
 								<< " score=" << score;
 						}
@@ -4895,6 +4915,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " noFit=" << assaultRejectedFit
 						<< " noPath=" << assaultRejectedPath
 						<< " noTU=" << assaultRejectedTU
+						<< " noEnergy=" << assaultRejectedEnergy
 						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)assaultMoveMode;
 				}
@@ -4958,6 +4979,7 @@ void AIModule::brutalThink(BattleAction* action)
 	if (sneakyMeleeAssaultOverride)
 	{
 		travelTarget = sneakyMeleeAssaultPosition;
+		sneakyMeleeAssaultDirectWalk = true;
 		_allowedToCheckAttack = true;
 		if (_traceAI)
 		{
@@ -5093,9 +5115,25 @@ void AIModule::brutalThink(BattleAction* action)
 	if (travelTarget != myPos)
 	{
 		BattleActionCost reserved = BattleActionCost(_unit);
-		action->target = furthestToGoTowards(travelTarget, reserved, _allPathFindingNodes);
+		if (sneakyMeleeAssaultDirectWalk)
+		{
+			// Pandi: one-turn Sneaky melee assault already proved the exact tile is
+			// reachable with enough TUs left to hit. Do not let furthestToGoTowards()
+			// shorten it back to the current/staging tile.
+			action->target = travelTarget;
+			if (_traceAI)
+			{
+				Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE direct walk target unit=" << _unit->getId()
+					<< " target=" << action->target
+					<< " moveMode=" << (int)assaultMoveMode;
+			}
+		}
+		else
+		{
+			action->target = furthestToGoTowards(travelTarget, reserved, _allPathFindingNodes);
+		}
 		action->type = BA_WALK;
-		action->run = wantToRun();
+		action->run = sneakyMeleeAssaultDirectWalk ? (assaultMoveMode == BAM_RUN) : wantToRun();
 	} else
 	{
 		tryToPickUpGrenade(_unit->getTile(), action);
