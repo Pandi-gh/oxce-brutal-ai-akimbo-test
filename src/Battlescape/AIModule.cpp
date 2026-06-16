@@ -4763,7 +4763,15 @@ void AIModule::brutalThink(BattleAction* action)
 								continue;
 							}
 							const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
-							if (!_save->getTileEngine()->validMeleeRange(candidate, dir, _unit, unitToWalkTo, 0))
+							// Pandi: match player melee targeting semantics. The UI calls
+							// validMeleeRange(... target=0, dest, preferEnemy=false), which can
+							// find window/side hits that the stricter target-specific overload
+							// rejects. Accept only if the resolved destination is our intended
+							// target's tile.
+							Position meleeDest;
+							const bool meleeRangeValid = _save->getTileEngine()->validMeleeRange(candidate, dir, _unit, 0, &meleeDest, false)
+								&& meleeDest == unitToWalkTo->getPosition();
+							if (!meleeRangeValid)
 							{
 								++assaultRejectedMeleeRange;
 								if (_traceAI)
@@ -4773,7 +4781,8 @@ void AIModule::brutalThink(BattleAction* action)
 										<< " reason=badMeleeRange"
 										<< " dir=" << dir
 										<< " target=" << unitToWalkTo->getId()
-										<< " targetPos=" << unitToWalkTo->getPosition();
+										<< " targetPos=" << unitToWalkTo->getPosition()
+										<< " resolvedDest=" << meleeDest;
 								}
 								continue;
 							}
