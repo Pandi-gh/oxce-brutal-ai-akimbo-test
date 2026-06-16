@@ -4762,30 +4762,6 @@ void AIModule::brutalThink(BattleAction* action)
 								}
 								continue;
 							}
-							const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
-							// Pandi: match player melee targeting semantics. The UI calls
-							// validMeleeRange(... target=0, dest, preferEnemy=false), which can
-							// find window/side hits that the stricter target-specific overload
-							// rejects. Accept only if the resolved destination is our intended
-							// target's tile.
-							Position meleeDest;
-							const bool meleeRangeValid = _save->getTileEngine()->validMeleeRange(candidate, dir, _unit, 0, &meleeDest, false)
-								&& meleeDest == unitToWalkTo->getPosition();
-							if (!meleeRangeValid)
-							{
-								++assaultRejectedMeleeRange;
-								if (_traceAI)
-								{
-									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-										<< " pos=" << candidate
-										<< " reason=badMeleeRange"
-										<< " dir=" << dir
-										<< " target=" << unitToWalkTo->getId()
-										<< " targetPos=" << unitToWalkTo->getPosition()
-										<< " resolvedDest=" << meleeDest;
-								}
-								continue;
-							}
 							if (!_save->setUnitPosition(_unit, candidate, true))
 							{
 								++assaultRejectedFit;
@@ -4812,9 +4788,9 @@ void AIModule::brutalThink(BattleAction* action)
 								_save->getPathfinding()->abortPath();
 								continue;
 							}
-							const int moveTU = _save->getPathfinding()->getTotalTUCost();
+							const int assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
 							_save->getPathfinding()->abortPath();
-							if (moveTU + hitTU > _unit->getTimeUnits())
+							if (assaultMoveTU + hitTU > _unit->getTimeUnits())
 							{
 								++assaultRejectedTU;
 								if (_traceAI)
@@ -4822,13 +4798,40 @@ void AIModule::brutalThink(BattleAction* action)
 									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
 										<< " pos=" << candidate
 										<< " reason=noTU"
-										<< " moveTU=" << moveTU
+										<< " moveTU=" << assaultMoveTU
 										<< " hitTU=" << hitTU
 										<< " currentTU=" << _unit->getTimeUnits();
 								}
 								continue;
 							}
-						const bool visible = isPositionVisibleToEnemy(candidate, true);
+
+							// Pandi: TileEngine::validMeleeRange uses the attacker's actual
+							// position for voxel origins. Temporarily move the unit to the
+							// candidate tile so window/side melee checks match real player usage.
+							const Position oldUnitPos = _unit->getPosition();
+							_save->setUnitPosition(_unit, candidate, false);
+							const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
+							Position meleeDest;
+							const bool meleeRangeValid = _save->getTileEngine()->validMeleeRange(candidate, dir, _unit, 0, &meleeDest, false)
+								&& meleeDest == unitToWalkTo->getPosition();
+							_save->setUnitPosition(_unit, oldUnitPos, false);
+							if (!meleeRangeValid)
+							{
+								++assaultRejectedMeleeRange;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=badMeleeRange"
+										<< " dir=" << dir
+										<< " target=" << unitToWalkTo->getId()
+										<< " targetPos=" << unitToWalkTo->getPosition()
+										<< " resolvedDest=" << meleeDest;
+								}
+								continue;
+							}
+							const int moveTU = assaultMoveTU;
+							const bool visible = isPositionVisibleToEnemy(candidate, true);
 						const UnitSide side = getSideFacingToPosition(unitToWalkTo, candidate);
 						float sideScore = 1.0f;
 						switch (side)
