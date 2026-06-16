@@ -4701,6 +4701,7 @@ void AIModule::brutalThink(BattleAction* action)
 	int sneakyMeleeAssaultHitTU = 0;
 	int sneakyMeleeAssaultSide = -1;
 	bool sneakyMeleeAssaultVisible = false;
+	BattleActionMove sneakyMeleeAssaultMoveMode = BAM_NORMAL;
 	BattleActionMove assaultMoveMode = BAM_NORMAL;
 	bool sneakyMeleeAssaultDirectWalk = false;
 		int assaultCandidatesChecked = 0;
@@ -4776,37 +4777,66 @@ void AIModule::brutalThink(BattleAction* action)
 								}
 								continue;
 							}
-							_save->getPathfinding()->calculate(_unit, candidate, assaultMoveMode, 0, maxMoveTU);
-							if (_save->getPathfinding()->getStartDirection() == -1)
-							{
-								++assaultRejectedPath;
-								if (_traceAI)
+								// Pandi: Sneaky assault tries walking first to preserve stamina. If
+								// walking cannot complete the full move+hit plan in this turn, it may
+								// fall back to running, but only if the resulting plan also fits energy.
+								int assaultMoveTU = -1;
+								int assaultMoveEnergy = -1;
+								BattleActionMove candidateMoveMode = BAM_NORMAL;
+								bool candidatePathFound = false;
+
+								_save->getPathfinding()->calculate(_unit, candidate, BAM_NORMAL, 0, maxMoveTU);
+								if (_save->getPathfinding()->getStartDirection() != -1)
 								{
-									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-										<< " pos=" << candidate
-										<< " reason=noPath"
-										<< " moveMode=" << (int)assaultMoveMode
-										<< " maxMoveTU=" << maxMoveTU;
+									assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
+									assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
+									candidatePathFound = true;
 								}
 								_save->getPathfinding()->abortPath();
-								continue;
-							}
-							const int assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
-								const int assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
-							_save->getPathfinding()->abortPath();
-							if (assaultMoveTU + hitTU > _unit->getTimeUnits())
-							{
-								++assaultRejectedTU;
-								if (_traceAI)
+
+								const bool normalFitsTU = candidatePathFound && assaultMoveTU + hitTU <= _unit->getTimeUnits();
+								const bool normalFitsEnergy = candidatePathFound && assaultMoveEnergy + hitEnergy <= _unit->getEnergy();
+								if ((!candidatePathFound || !normalFitsTU) && wantToRun())
 								{
-									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-										<< " pos=" << candidate
-										<< " reason=noTU"
-										<< " moveTU=" << assaultMoveTU
-										<< " hitTU=" << hitTU
-										<< " currentTU=" << _unit->getTimeUnits();
+									_save->getPathfinding()->calculate(_unit, candidate, BAM_RUN, 0, maxMoveTU);
+									if (_save->getPathfinding()->getStartDirection() != -1)
+									{
+										assaultMoveTU = _save->getPathfinding()->getTotalTUCost();
+										assaultMoveEnergy = _save->getPathfinding()->getTotalEnergyCost();
+										candidateMoveMode = BAM_RUN;
+										candidatePathFound = true;
+									}
+									_save->getPathfinding()->abortPath();
 								}
-								continue;
+
+								if (!candidatePathFound)
+								{
+									++assaultRejectedPath;
+									if (_traceAI)
+									{
+										Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+											<< " pos=" << candidate
+											<< " reason=noPath"
+											<< " triedRun=" << (wantToRun() ? 1 : 0)
+											<< " maxMoveTU=" << maxMoveTU;
+									}
+									continue;
+								}
+								if (assaultMoveTU + hitTU > _unit->getTimeUnits())
+								{
+									++assaultRejectedTU;
+									if (_traceAI)
+									{
+										Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+											<< " pos=" << candidate
+											<< " reason=noTU"
+											<< " moveTU=" << assaultMoveTU
+											<< " hitTU=" << hitTU
+											<< " currentTU=" << _unit->getTimeUnits()
+											<< " moveMode=" << (int)candidateMoveMode;
+									}
+									continue;
+								}
 								if (assaultMoveEnergy + hitEnergy > _unit->getEnergy())
 								{
 									++assaultRejectedEnergy;
@@ -4817,11 +4847,12 @@ void AIModule::brutalThink(BattleAction* action)
 											<< " reason=noEnergy"
 											<< " moveEnergy=" << assaultMoveEnergy
 											<< " hitEnergy=" << hitEnergy
-											<< " currentEnergy=" << _unit->getEnergy();
+											<< " currentEnergy=" << _unit->getEnergy()
+											<< " moveMode=" << (int)candidateMoveMode;
 									}
 									continue;
 								}
-							}
+
 
 							// Pandi: TileEngine::validMeleeRange uses the attacker's actual
 							// position for voxel origins. Temporarily move the unit to the
@@ -4917,7 +4948,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " noTU=" << assaultRejectedTU
 						<< " noEnergy=" << assaultRejectedEnergy
 						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
-						<< " moveMode=" << (int)assaultMoveMode;
+						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
 	bool sneakyMeleeApproachOverride = false;
 	Position sneakyMeleeApproachPosition = myPos;
@@ -5125,7 +5156,7 @@ void AIModule::brutalThink(BattleAction* action)
 			{
 				Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE direct walk target unit=" << _unit->getId()
 					<< " target=" << action->target
-					<< " moveMode=" << (int)assaultMoveMode;
+					<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 			}
 		}
 		else
@@ -5133,7 +5164,7 @@ void AIModule::brutalThink(BattleAction* action)
 			action->target = furthestToGoTowards(travelTarget, reserved, _allPathFindingNodes);
 		}
 		action->type = BA_WALK;
-		action->run = sneakyMeleeAssaultDirectWalk ? (assaultMoveMode == BAM_RUN) : wantToRun();
+		action->run = sneakyMeleeAssaultDirectWalk ? (sneakyMeleeAssaultMoveMode == BAM_RUN) : wantToRun();
 	} else
 	{
 		tryToPickUpGrenade(_unit->getTile(), action);
