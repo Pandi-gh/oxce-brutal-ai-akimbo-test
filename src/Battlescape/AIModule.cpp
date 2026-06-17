@@ -4342,7 +4342,11 @@ if (_traceAI)
 								{
 									attackScore *= 0.3f;
 									me.attackPotential *= 0.3f;
-								}me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
+								}
+							}
+						}
+					}
+					me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
 					if (pu->getPrevNode() && !isPositionVisibleToEnemy(pu->getPrevNode()->getPosition()))
 						currLastStepCost = pu->getTUCost(false).time - pu->getPrevNode()->getTUCost(false).time;
 				}
