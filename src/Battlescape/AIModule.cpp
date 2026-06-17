@@ -4267,9 +4267,23 @@ void AIModule::brutalThink(BattleAction* action)
 								Position staging = furthestToGoTowards(pos, reserve, _allPathFindingNodes);
 								if (staging != myPos)
 								{
+									// Pandi: Sneaky staging must be hidden — visible staging defeats the purpose of ambush.
 									const bool stagingVisible = isPositionVisibleToEnemy(staging, true);
+									// Pandi: prefer staging within weapon range of target so NEXT turn the unit
+									// can move 1-2 tiles and fire immediately (critical for shotguns with 4-tile range).
+									const float stagingDistToTarget = Position::distance(staging, targetPosition);
+									const float weaponRange = maxExtenderRangeWith(_unit, getMaxTU(_unit));
+									const float rangeDiff = std::abs(stagingDistToTarget - weaponRange);
+									// Pandi: rangeBonus is max (200) when staging is exactly at weapon range,
+									// drops to 0 when more than 4 tiles away from weapon range.
+									const float rangeBonus = (rangeDiff <= 4.0f) ? (4.0f - rangeDiff) * 50.0f : 0.0f;
 									const float progress = Position::distance(myPos, pos) - Position::distance(staging, pos);
-									float stagingScore = progress * 100.0f - (stagingVisible ? 250.0f : 0.0f) + (pathFound ? 25.0f : 0.0f);
+									float stagingScore = progress * 100.0f + rangeBonus + (pathFound ? 25.0f : 0.0f);
+									// Pandi: heavily penalize visible staging — ambush requires concealment.
+									if (stagingVisible)
+									{
+										stagingScore *= 0.05f;
+									}
 									if (stagingScore > bestSneakyRangedStagingScore)
 									{
 										bestSneakyRangedStagingScore = stagingScore;
@@ -5021,13 +5035,22 @@ void AIModule::brutalThink(BattleAction* action)
 	{
 		travelTarget = bestSneakyRangedStagingPosition;
 		shouldEndTurnAfterMove = true;
+		// Pandi: face towards the target so the unit is ready to fire next turn.
+		if (unitToWalkTo)
+		{
+			Position faceTarget = unitToWalkTo->getPosition();
+			if (!_unit->isCheatOnMovement())
+				faceTarget = _save->getTileCoords(unitToWalkTo->getTileLastSpotted(_unit->getFaction()));
+			action->finalFacing = _save->getTileEngine()->getDirectionTo(travelTarget, faceTarget);
+		}
 		if (_traceAI)
 		{
 			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging override unit=" << _unit->getId()
 				<< " staging=" << bestSneakyRangedStagingPosition
 				<< " rejectedAttack=" << bestSneakyRangedRejectedAttackPosition
 				<< " score=" << bestSneakyRangedStagingScore
-				<< " visible=" << (bestSneakyRangedStagingVisible ? 1 : 0);
+				<< " visible=" << (bestSneakyRangedStagingVisible ? 1 : 0)
+				<< " facing=" << action->finalFacing;
 		}
 	}
 	else 	if (sneakyMeleeAssaultOverride)
