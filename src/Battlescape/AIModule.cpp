@@ -3754,9 +3754,6 @@ void AIModule::brutalThink(BattleAction* action)
 	bool winnerWasSpecialDoorCase = false;
 	bool shouldHaveLofAfterMove = false;
 	bool shouldEndTurnAfterMove = false;
-	// Pandi: Sneaky ranged staging is a deliberate stop-and-wait decision.
-	// Do not let later generic contact/visible-unit logic clear its end-turn flag.
-	bool forceEndTurnAfterSneakyRangedStaging = false;
 	int peakDirection = _unit->getDirection();
 	int lastStepCost = 0;
 	int attackTU = snapCost.Time;
@@ -4267,77 +4264,35 @@ void AIModule::brutalThink(BattleAction* action)
 								BattleActionCost reserve(_unit);
 								reserve.Time += shotTU;
 								reserve.Energy += shotEnergy;
-
-								auto considerStaging = [&](BattleActionMove stagingMode)
+								Position staging = furthestToGoTowards(pos, reserve, _allPathFindingNodes);
+								if (staging != myPos)
 								{
-									bool stagingRanOut = false;
-									std::vector<PathfindingNode*> stagingNodes = _save->getPathfinding()->findReachablePathFindingNodes(_unit, reserve, stagingRanOut, true, NULL, NULL, false, false, stagingMode);
-									Position staging = furthestToGoTowards(pos, reserve, stagingNodes);
-									if (staging == myPos)
-									{
-										return;
-									}
-
-									_save->getPathfinding()->calculate(_unit, staging, stagingMode, 0, 1000);
-									const bool stagingPathFound = _save->getPathfinding()->getStartDirection() != -1;
-									const int stagingMoveTU = stagingPathFound ? _save->getPathfinding()->getTotalTUCost() : INT_MAX / 4;
-									const int stagingMoveEnergy = stagingPathFound ? _save->getPathfinding()->getTotalEnergyCost() : INT_MAX / 4;
-									_save->getPathfinding()->abortPath();
-									if (!stagingPathFound || stagingMoveTU + shotTU > _unit->getTimeUnits() || stagingMoveEnergy + shotEnergy > _unit->getEnergy())
-									{
-										if (_traceAI)
-										{
-											Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging reject unit=" << _unit->getId()
-												<< " attackPos=" << pos
-												<< " staging=" << staging
-												<< " mode=" << (int)stagingMode
-												<< " path=" << (stagingPathFound ? 1 : 0)
-												<< " moveTU=" << stagingMoveTU
-												<< " shotTU=" << shotTU
-												<< " moveEnergy=" << stagingMoveEnergy
-												<< " shotEnergy=" << shotEnergy;
-										}
-										return;
-									}
-
 									const bool stagingVisible = isPositionVisibleToEnemy(staging, true);
 									const float progress = Position::distance(myPos, pos) - Position::distance(staging, pos);
-									const float targetDist = Position::distance(staging, targetPosition);
-									const float rangeReadiness = std::max(0.0f, 12.0f - targetDist) * 100.0f;
-									const float reserveBonus = (_unit->getTimeUnits() - stagingMoveTU - shotTU) * 5.0f;
-									float stagingScore = progress * 100.0f + rangeReadiness + reserveBonus - (stagingVisible ? 250.0f : 0.0f) + (stagingMode == BAM_RUN ? 75.0f : 0.0f) + (pathFound ? 25.0f : 0.0f);
+									float stagingScore = progress * 100.0f - (stagingVisible ? 250.0f : 0.0f) + (pathFound ? 25.0f : 0.0f);
 									if (stagingScore > bestSneakyRangedStagingScore)
 									{
 										bestSneakyRangedStagingScore = stagingScore;
 										bestSneakyRangedStagingPosition = staging;
 										bestSneakyRangedRejectedAttackPosition = pos;
-										bestSneakyRangedStagingMoveTU = stagingMoveTU;
+										bestSneakyRangedStagingMoveTU = tuCostToReachPosition(staging, _allPathFindingNodes);
 										bestSneakyRangedStagingShotTU = shotTU;
 										bestSneakyRangedStagingVisible = stagingVisible;
 									}
 									if (_traceAI)
 									{
-										Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging candidate unit=" << _unit->getId()
+										Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED attack reject unit=" << _unit->getId()
 											<< " attackPos=" << pos
-											<< " staging=" << staging
-											<< " mode=" << (int)stagingMode
-											<< " targetDist=" << targetDist
-											<< " stagingVisible=" << (stagingVisible ? 1 : 0)
-											<< " moveTU=" << stagingMoveTU
+											<< " oldAttack=" << oldAttackScore
+											<< " pathFound=" << (pathFound ? 1 : 0)
+											<< " sneakyMoveTU=" << sneakyMoveTU
 											<< " shotTU=" << shotTU
-											<< " moveEnergy=" << stagingMoveEnergy
+											<< " sneakyMoveEnergy=" << sneakyMoveEnergy
 											<< " shotEnergy=" << shotEnergy
+											<< " staging=" << staging
+											<< " stagingVisible=" << (stagingVisible ? 1 : 0)
 											<< " stagingScore=" << stagingScore;
 									}
-								};
-
-								// Pandi: consider both walking and running staging, but only accept a
-								// candidate if the resulting move+reserved shot fits TU and energy.
-								considerStaging(BAM_NORMAL);
-								if (Options::strafe && _unit->getArmor()->allowsRunning())
-								{
-									considerStaging(BAM_RUN);
-								}
 								}
 							}
 						}
@@ -5066,7 +5021,6 @@ void AIModule::brutalThink(BattleAction* action)
 	{
 		travelTarget = bestSneakyRangedStagingPosition;
 		shouldEndTurnAfterMove = true;
-		forceEndTurnAfterSneakyRangedStaging = true;
 		if (_traceAI)
 		{
 			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging override unit=" << _unit->getId()
@@ -5317,7 +5271,7 @@ void AIModule::brutalThink(BattleAction* action)
 		if (_traceAI)
 			Log(LOG_INFO) << "Overruling facing towards direction that reveals most tiles: " << action->finalFacing;
 	}
-	if (!forceEndTurnAfterSneakyRangedStaging && (!_unit->getVisibleUnits()->empty() || contact || _save->getTileEngine()->isNextToDoor(myTile)))
+	if (!_unit->getVisibleUnits()->empty() || contact || _save->getTileEngine()->isNextToDoor(myTile))
 		shouldEndTurnAfterMove = false;
 	if (shouldEndTurnAfterMove)
 		_unit->setWantToEndTurn(true);
