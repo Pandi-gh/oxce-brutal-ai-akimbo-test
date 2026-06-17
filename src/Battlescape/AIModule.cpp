@@ -5478,12 +5478,24 @@ int AIModule::tuCostToReachPosition(Position pos, const std::vector<PathfindingN
 		return tuCostToClosestNode;
 	if (actor == NULL)
 		actor = _unit;
-	for (auto pn : nodeVector)
-	{
-		if (pos == pn->getPosition())
-			return pn->getTUCost(false).time;
-		if (forceExactPosition)
-			continue;
+		int minCost = 10000;
+		bool foundExact = false;
+		for (auto pn : nodeVector)
+		{
+			if (pos == pn->getPosition())
+			{
+				int cost = energyInsteadOfTU ? pn->getTUCost(false).energy : pn->getTUCost(false).time;
+				if (cost < minCost)
+					minCost = cost;
+				foundExact = true;
+			}
+		}
+		if (foundExact) return minCost;
+		
+		for (auto pn : nodeVector)
+		{
+			if (forceExactPosition)
+				continue;
 		Tile *tile = _save->getTile(pn->getPosition());
 		if (pos.z != pn->getPosition().z)
 			continue;
