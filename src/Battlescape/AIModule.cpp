@@ -3674,6 +3674,15 @@ void AIModule::brutalThink(BattleAction* action)
 	// Pandi: for Sneaky melee; immediate attack tiles visible to enemies
 	// should lose to low-visibility approach positions when possible.
 	bool bestAttackPositionVisibleToEnemy = false;
+	// Pandi: DynamicTraits Sneaky ranged staging. If a visible/short-range
+	// attack tile is too expensive under real Sneaky pathing to leave time and
+	// energy for a shot, keep a safe approach tile instead.
+	float bestSneakyRangedStagingScore = 0.0f;
+	Position bestSneakyRangedStagingPosition = myPos;
+	Position bestSneakyRangedRejectedAttackPosition = myPos;
+	int bestSneakyRangedStagingMoveTU = 0;
+	int bestSneakyRangedStagingShotTU = 0;
+	bool bestSneakyRangedStagingVisible = false;
 	// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
 	// strongest true flanking attack candidate separately from Brutal's normal
 	// bestAttackPosition so we can see whether a viable flank existed.
@@ -4215,6 +4224,79 @@ void AIModule::brutalThink(BattleAction* action)
 								<< " attack=" << oldAttackScore << "->" << attackScore;
 						}
 					}
+					// Pandi: Sneaky ranged/short-ranged plan validation. Brutal's normal
+					// scoring may think an attack tile is reachable, but real Sneaky A*
+					// can be much more expensive because visible tiles are penalized. If
+					// moving to this attack tile would leave no TU/energy for at least one
+					// useful shot, reject it and remember a staging tile with shot reserve.
+					if (_unit->isSneakyRuntime() && !IAmPureMelee && attackScore > 0 && _attackAction.weapon)
+					{
+						int shotTU = INT_MAX;
+						int shotEnergy = 0;
+						auto considerShot = [&](BattleActionType type)
+						{
+							BattleActionCost c(type, _unit, _attackAction.weapon);
+							if (c.Time > 0 && c.Time < shotTU)
+							{
+								shotTU = c.Time;
+								shotEnergy = c.Energy;
+							}
+						};
+						considerShot(BA_SNAPSHOT);
+						considerShot(BA_AUTOSHOT);
+						considerShot(BA_AIMEDSHOT);
+						if (_unit->isAkimbo()) considerShot(BA_AKIMBOSHOT);
+						if (shotTU != INT_MAX)
+						{
+							_save->getPathfinding()->calculate(_unit, pos, bam, 0, 1000);
+							const bool pathFound = _save->getPathfinding()->getStartDirection() != -1;
+							const int sneakyMoveTU = pathFound ? _save->getPathfinding()->getTotalTUCost() : INT_MAX / 4;
+							const int sneakyMoveEnergy = pathFound ? _save->getPathfinding()->getTotalEnergyCost() : INT_MAX / 4;
+							_save->getPathfinding()->abortPath();
+							const bool fullAttackFits = pathFound
+								&& sneakyMoveTU + shotTU <= _unit->getTimeUnits()
+								&& sneakyMoveEnergy + shotEnergy <= _unit->getEnergy();
+							if (!fullAttackFits)
+							{
+								const float oldAttackScore = attackScore;
+								attackScore = 0.0f;
+								me.attackPotential = 0.0f;
+								BattleActionCost reserve(_unit);
+								reserve.Time += shotTU;
+								reserve.Energy += shotEnergy;
+								Position staging = furthestToGoTowards(pos, reserve, _allPathFindingNodes);
+								if (staging != myPos)
+								{
+									const bool stagingVisible = isPositionVisibleToEnemy(staging, true);
+									const float progress = Position::distance(myPos, pos) - Position::distance(staging, pos);
+									float stagingScore = progress * 100.0f - (stagingVisible ? 250.0f : 0.0f) + (pathFound ? 25.0f : 0.0f);
+									if (stagingScore > bestSneakyRangedStagingScore)
+									{
+										bestSneakyRangedStagingScore = stagingScore;
+										bestSneakyRangedStagingPosition = staging;
+										bestSneakyRangedRejectedAttackPosition = pos;
+										bestSneakyRangedStagingMoveTU = tuCostToReachPosition(staging, _allPathFindingNodes);
+										bestSneakyRangedStagingShotTU = shotTU;
+										bestSneakyRangedStagingVisible = stagingVisible;
+									}
+									if (_traceAI)
+									{
+										Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED attack reject unit=" << _unit->getId()
+											<< " attackPos=" << pos
+											<< " oldAttack=" << oldAttackScore
+											<< " pathFound=" << (pathFound ? 1 : 0)
+											<< " sneakyMoveTU=" << sneakyMoveTU
+											<< " shotTU=" << shotTU
+											<< " sneakyMoveEnergy=" << sneakyMoveEnergy
+											<< " shotEnergy=" << shotEnergy
+											<< " staging=" << staging
+											<< " stagingVisible=" << (stagingVisible ? 1 : 0)
+											<< " stagingScore=" << stagingScore;
+									}
+								}
+							}
+						}
+					}
 					me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
 					if (pu->getPrevNode() && !isPositionVisibleToEnemy(pu->getPrevNode()->getPosition()))
 						currLastStepCost = pu->getTUCost(false).time - pu->getPrevNode()->getTUCost(false).time;
@@ -4562,6 +4644,15 @@ void AIModule::brutalThink(BattleAction* action)
 			{
 				Log(LOG_INFO) << "bestAttackPosition: " << bestAttackPosition << " score: " << bestAttackScore;
 			}
+				if (_unit->isSneakyRuntime() && !IAmPureMelee && bestSneakyRangedStagingScore > 0)
+				{
+					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED best staging pos=" << bestSneakyRangedStagingPosition
+						<< " score=" << bestSneakyRangedStagingScore
+						<< " rejectedAttack=" << bestSneakyRangedRejectedAttackPosition
+						<< " stagingMoveTU=" << bestSneakyRangedStagingMoveTU
+						<< " shotReserveTU=" << bestSneakyRangedStagingShotTU
+						<< " visible=" << (bestSneakyRangedStagingVisible ? 1 : 0);
+				}
 				if (_unit->isFlankerRuntime())
 				{
 					if (bestFlankerAttackScore > 0)
@@ -4926,7 +5017,20 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
-	if (sneakyMeleeAssaultOverride)
+	if (_unit->isSneakyRuntime() && !IAmPureMelee && bestAttackScore <= 0 && bestSneakyRangedStagingScore > 0)
+	{
+		travelTarget = bestSneakyRangedStagingPosition;
+		shouldEndTurnAfterMove = true;
+		if (_traceAI)
+		{
+			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging override unit=" << _unit->getId()
+				<< " staging=" << bestSneakyRangedStagingPosition
+				<< " rejectedAttack=" << bestSneakyRangedRejectedAttackPosition
+				<< " score=" << bestSneakyRangedStagingScore
+				<< " visible=" << (bestSneakyRangedStagingVisible ? 1 : 0);
+		}
+	}
+	else 	if (sneakyMeleeAssaultOverride)
 	{
 		travelTarget = sneakyMeleeAssaultPosition;
 		sneakyMeleeAssaultDirectWalk = true;
