@@ -3683,6 +3683,13 @@ void AIModule::brutalThink(BattleAction* action)
 	int bestSneakyRangedStagingMoveTU = 0;
 	int bestSneakyRangedStagingShotTU = 0;
 	bool bestSneakyRangedStagingVisible = false;
+	// Pandi: проактивный Sneaky Ranged ambush (ищет скрытые позиции ДО основного цикла)
+	bool sneakyRangedAmbushDirectAttack = false;
+	Position sneakyRangedAmbushPosition = myPos;
+	float sneakyRangedAmbushScore = 0.0f;
+	int sneakyRangedAmbushMoveTU = 0;
+	int sneakyRangedAmbushShotTU = 0;
+	bool sneakyRangedAmbushHidden = false;
 	// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
 	// strongest true flanking attack candidate separately from Brutal's normal
 	// bestAttackPosition so we can see whether a viable flank existed.
@@ -3716,7 +3723,76 @@ void AIModule::brutalThink(BattleAction* action)
 	}
 	if (!_unit->getVisibleUnits()->empty() || contact)
 		saveDistance = false;
-	if (_traceAI)
+		// Pandi: проактивный Sneaky ranged ambush search.
+	if (_unit->isSneakyRuntime() && !IAmPureMelee && unitToWalkTo && _attackAction.weapon)
+	{
+		const float weapRange = maxExtenderRangeWith(_unit, getMaxTU(_unit));
+		int minShotTU = INT_MAX;
+		int minShotEnergy = 0;
+		auto considerShot = [&](BattleActionType t) {
+			BattleActionCost c(t, _unit, _attackAction.weapon);
+			if (c.Time > 0 && c.Time < minShotTU) { minShotTU = c.Time; minShotEnergy = c.Energy; }
+		};
+		considerShot(BA_SNAPSHOT);
+		considerShot(BA_AUTOSHOT);
+		considerShot(BA_AIMEDSHOT);
+		if (_unit->isAkimbo()) considerShot(BA_AKIMBOSHOT);
+		for (auto ambushPnf : _allPathFindingNodes)
+		{
+			Position cand = ambushPnf->getPosition();
+			Tile* candTile = _save->getTile(cand);
+			if (!candTile || candTile->getDangerous() || candTile->getFire()) continue;
+			if (candTile->hasNoFloor() && _unit->getMovementType() != MT_FLY) continue;
+			const int moveTU = ambushPnf->getTUCost(false).time;
+			const int moveEnergy = ambushPnf->getTUCost(false).energy;
+			if (moveTU < 0 || moveTU > _unit->getTimeUnits()) continue;
+			if (moveEnergy > _unit->getEnergy()) continue;
+			const bool hidden = !isPositionVisibleToEnemy(cand, true);
+			const float distToTarget = Position::distance(cand, targetPosition);
+			if (!hidden && distToTarget > weapRange + 4.0f) continue;
+			bool hasLOS = false;
+			Position originVoxel = cand.toVoxel() + Position(8, 8, 0);
+			originVoxel.z += _unit->getHeight() + _unit->getFloatHeight() - candTile->getTerrainLevel() - 4;
+			hasLOS = _save->getTileEngine()->canTargetUnit(&originVoxel, unitToWalkTo->getTile(), nullptr, _unit, false);
+			if (!hasLOS) hasLOS = clearSight(cand, targetPosition);
+			float score = 0.0f;
+			if (hidden) score += 3000.0f;
+			if (hasLOS) score += 1500.0f;
+			if (distToTarget <= weapRange + 1.0f) score += 800.0f;
+			else if (distToTarget <= weapRange + 4.0f) score += 400.0f - (distToTarget - weapRange) * 80.0f;
+			score += (_unit->getTimeUnits() - moveTU) * 3.0f;
+			score += getCoverValue(candTile, _unit, 2) * 5.0f;
+			if (score > sneakyRangedAmbushScore)
+			{
+				sneakyRangedAmbushScore = score;
+				sneakyRangedAmbushPosition = cand;
+				sneakyRangedAmbushMoveTU = moveTU;
+				sneakyRangedAmbushHidden = hidden;
+				if (minShotTU != INT_MAX && moveTU + minShotTU <= _unit->getTimeUnits() && moveEnergy + minShotEnergy <= _unit->getEnergy())
+				{
+					sneakyRangedAmbushShotTU = minShotTU;
+					sneakyRangedAmbushDirectAttack = true;
+				}
+				else if (minShotTU != INT_MAX)
+				{
+					sneakyRangedAmbushShotTU = minShotTU;
+				}
+			}
+		}
+		if (_traceAI && sneakyRangedAmbushScore > 0)
+		{
+			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED ambush search unit=" << _unit->getId()
+				<< " pos=" << sneakyRangedAmbushPosition
+				<< " score=" << sneakyRangedAmbushScore
+				<< " hidden=" << (sneakyRangedAmbushHidden ? 1 : 0)
+				<< " moveTU=" << sneakyRangedAmbushMoveTU
+				<< " shotTU=" << sneakyRangedAmbushShotTU
+				<< " directAttack=" << (sneakyRangedAmbushDirectAttack ? 1 : 0)
+				<< " weapRange=" << weapRange
+				<< " distToTarget=" << Position::distance(sneakyRangedAmbushPosition, targetPosition);
+		}
+	}
+if (_traceAI)
 		Log(LOG_INFO) << "I have last been seen: " << _unit->getTurnsSinceSeen(_targetFaction);
 	if (_traceAI && immobileEnemies)
 		Log(LOG_INFO) << "Immobile enemies detected. Taking cover takes precedent over attacking.";
@@ -4256,62 +4332,17 @@ void AIModule::brutalThink(BattleAction* action)
 							const bool fullAttackFits = pathFound
 								&& sneakyMoveTU + shotTU <= _unit->getTimeUnits()
 								&& sneakyMoveEnergy + shotEnergy <= _unit->getEnergy();
-							if (!fullAttackFits)
+														if (!fullAttackFits)
 							{
 								const float oldAttackScore = attackScore;
 								attackScore = 0.0f;
 								me.attackPotential = 0.0f;
-								BattleActionCost reserve(_unit);
-								reserve.Time += shotTU;
-								reserve.Energy += shotEnergy;
-								Position staging = furthestToGoTowards(pos, reserve, _allPathFindingNodes);
-								if (staging != myPos)
+								// Pandi: для Sneaky ranged — если уже нашли скрытую ambush, штрафуем обычную атаку.
+								if (_unit->isSneakyRuntime() && !IAmPureMelee && attackScore > 0 && sneakyRangedAmbushScore > 0)
 								{
-									// Pandi: Sneaky staging must be hidden — visible staging defeats the purpose of ambush.
-									const bool stagingVisible = isPositionVisibleToEnemy(staging, true);
-									// Pandi: prefer staging within weapon range of target so NEXT turn the unit
-									// can move 1-2 tiles and fire immediately (critical for shotguns with 4-tile range).
-									const float stagingDistToTarget = Position::distance(staging, targetPosition);
-									const float weaponRange = maxExtenderRangeWith(_unit, getMaxTU(_unit));
-									const float rangeDiff = std::abs(stagingDistToTarget - weaponRange);
-									// Pandi: rangeBonus is max (200) when staging is exactly at weapon range,
-									// drops to 0 when more than 4 tiles away from weapon range.
-									const float rangeBonus = (rangeDiff <= 4.0f) ? (4.0f - rangeDiff) * 50.0f : 0.0f;
-									const float progress = Position::distance(myPos, pos) - Position::distance(staging, pos);
-									float stagingScore = progress * 100.0f + rangeBonus + (pathFound ? 25.0f : 0.0f);
-									// Pandi: heavily penalize visible staging — ambush requires concealment.
-									if (stagingVisible)
-									{
-										stagingScore *= 0.05f;
-									}
-									if (stagingScore > bestSneakyRangedStagingScore)
-									{
-										bestSneakyRangedStagingScore = stagingScore;
-										bestSneakyRangedStagingPosition = staging;
-										bestSneakyRangedRejectedAttackPosition = pos;
-										bestSneakyRangedStagingMoveTU = tuCostToReachPosition(staging, _allPathFindingNodes);
-										bestSneakyRangedStagingShotTU = shotTU;
-										bestSneakyRangedStagingVisible = stagingVisible;
-									}
-									if (_traceAI)
-									{
-										Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED attack reject unit=" << _unit->getId()
-											<< " attackPos=" << pos
-											<< " oldAttack=" << oldAttackScore
-											<< " pathFound=" << (pathFound ? 1 : 0)
-											<< " sneakyMoveTU=" << sneakyMoveTU
-											<< " shotTU=" << shotTU
-											<< " sneakyMoveEnergy=" << sneakyMoveEnergy
-											<< " shotEnergy=" << shotEnergy
-											<< " staging=" << staging
-											<< " stagingVisible=" << (stagingVisible ? 1 : 0)
-											<< " stagingScore=" << stagingScore;
-									}
-								}
-							}
-						}
-					}
-					me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
+									attackScore *= 0.3f;
+									me.attackPotential *= 0.3f;
+								}me.bestDirection = _save->getTileEngine()->getDirectionTo(pos, currentAttackDirection);
 					if (pu->getPrevNode() && !isPositionVisibleToEnemy(pu->getPrevNode()->getPosition()))
 						currLastStepCost = pu->getTUCost(false).time - pu->getPrevNode()->getTUCost(false).time;
 				}
@@ -5031,6 +5062,34 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
+	// Pandi: проактивный Sneaky ambush — если нашли скрытую позицию, используем её.
+	if (_unit->isSneakyRuntime() && !IAmPureMelee && sneakyRangedAmbushScore > 0 &&
+		(bestAttackScore <= 0 || (sneakyRangedAmbushDirectAttack && sneakyRangedAmbushHidden)))
+	{
+		travelTarget = sneakyRangedAmbushPosition;
+		if (sneakyRangedAmbushDirectAttack)
+		{
+			_allowedToCheckAttack = true;
+			if (_traceAI)
+				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED direct ambush unit=" << _unit->getId()
+					<< " target=" << travelTarget;
+		}
+		else
+		{
+			shouldEndTurnAfterMove = true;
+			if (unitToWalkTo)
+			{
+				Position faceTarget = unitToWalkTo->getPosition();
+				if (!_unit->isCheatOnMovement())
+					faceTarget = _save->getTileCoords(unitToWalkTo->getTileLastSpotted(_unit->getFaction()));
+				action->finalFacing = _save->getTileEngine()->getDirectionTo(travelTarget, faceTarget);
+			}
+			if (_traceAI)
+				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED ambush staging unit=" << _unit->getId()
+					<< " staging=" << travelTarget
+					<< " facing=" << action->finalFacing;
+		}
+	}
 	if (_unit->isSneakyRuntime() && !IAmPureMelee && bestAttackScore <= 0 && bestSneakyRangedStagingScore > 0)
 	{
 		travelTarget = bestSneakyRangedStagingPosition;
