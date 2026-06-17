@@ -935,8 +935,18 @@ public:
 	/// at the start of each hostile turn based on Unit::getUnitAggression().
 		bool isLeeroyJenkinsRuntime() const { return _isLeeroyJenkinsRuntime || _leeroyJenkinsRuntimeTurns > 0; }
 		void setLeeroyJenkinsRuntime(bool v) { _isLeeroyJenkinsRuntime = v; }
-		bool isSneakyRuntime() const { return _isSneaky || _isSneakyRuntime || _sneakyRuntimeTurns > 0; }
-		void setSneakyRuntime(bool v) { _isSneakyRuntime = v; }
+bool isSneakyRuntime() const {
+		// Pandi: mode-4 uses duration-based _sneakyRuntimeTurns;
+		// mode-3 uses sticky _isSneakyRuntime. Isolate them to prevent stale-leak.
+		if (Options::brutalAI == 4 || Options::brutalCivilians == 4)
+			return _isSneaky || _sneakyRuntimeTurns > 0;
+		if (Options::brutalAI == 3 || Options::brutalCivilians == 3)
+			return _isSneaky || _isSneakyRuntime;
+		return _isSneaky;
+	}
+	// Pandi: mode-4 specific Sneaky check (duration turns only, no mode-3 flag).
+	bool isSneakyRuntimeTurns() const { return _isSneaky || _sneakyRuntimeTurns > 0; }
+	void setSneakyRuntime(bool v) { _isSneakyRuntime = v; }
 		// Pandi: DynamicTraits runtime/permanent accessors.
 		bool isCautiousRuntime() const { return _isCautious || _cautiousRuntimeTurns > 0; }
 		bool isFlankerRuntime() const { return _isFlanker || _flankerRuntimeTurns > 0; }
@@ -1051,3 +1061,4 @@ public:
 };
 
 } //namespace OpenXcom
+
