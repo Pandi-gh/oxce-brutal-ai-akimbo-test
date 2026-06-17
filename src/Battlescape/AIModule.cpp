@@ -3754,6 +3754,9 @@ void AIModule::brutalThink(BattleAction* action)
 	bool winnerWasSpecialDoorCase = false;
 	bool shouldHaveLofAfterMove = false;
 	bool shouldEndTurnAfterMove = false;
+	// Pandi: Sneaky ranged staging is a deliberate stop-and-wait decision.
+	// Do not let later generic contact/visible-unit logic clear its end-turn flag.
+	bool forceEndTurnAfterSneakyRangedStaging = false;
 	int peakDirection = _unit->getDirection();
 	int lastStepCost = 0;
 	int attackTU = snapCost.Time;
@@ -5021,6 +5024,7 @@ void AIModule::brutalThink(BattleAction* action)
 	{
 		travelTarget = bestSneakyRangedStagingPosition;
 		shouldEndTurnAfterMove = true;
+		forceEndTurnAfterSneakyRangedStaging = true;
 		if (_traceAI)
 		{
 			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging override unit=" << _unit->getId()
@@ -5271,7 +5275,7 @@ void AIModule::brutalThink(BattleAction* action)
 		if (_traceAI)
 			Log(LOG_INFO) << "Overruling facing towards direction that reveals most tiles: " << action->finalFacing;
 	}
-	if (!_unit->getVisibleUnits()->empty() || contact || _save->getTileEngine()->isNextToDoor(myTile))
+	if (!forceEndTurnAfterSneakyRangedStaging && (!_unit->getVisibleUnits()->empty() || contact || _save->getTileEngine()->isNextToDoor(myTile)))
 		shouldEndTurnAfterMove = false;
 	if (shouldEndTurnAfterMove)
 		_unit->setWantToEndTurn(true);
