@@ -1051,4 +1051,3 @@ public:
 };
 
 } //namespace OpenXcom
-
