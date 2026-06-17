@@ -23,6 +23,7 @@
 #include "../Battlescape/Position.h"
 #include "../Mod/Armor.h"
 #include "../Mod/RuleItem.h"
+#include "../Engine/Options.h"
 #include "Soldier.h"
 #include "BattleItem.h"
 
