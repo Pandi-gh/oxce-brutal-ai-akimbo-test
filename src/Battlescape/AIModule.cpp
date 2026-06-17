@@ -5078,26 +5078,26 @@ if (_traceAI)
 				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED direct ambush unit=" << _unit->getId()
 					<< " target=" << travelTarget;
 		}
-		else
-		{
-			shouldEndTurnAfterMove = true;
-			if (unitToWalkTo)
+			else
 			{
-				Position faceTarget = unitToWalkTo->getPosition();
-				if (!_unit->isCheatOnMovement())
-					faceTarget = _save->getTileCoords(unitToWalkTo->getTileLastSpotted(_unit->getFaction()));
-				action->finalFacing = _save->getTileEngine()->getDirectionTo(travelTarget, faceTarget);
+				shouldEndTurnAfterMove = true;
+				if (unitToWalkTo)
+				{
+					Position faceTarget = unitToWalkTo->getPosition();
+					if (!_unit->isCheatOnMovement())
+						faceTarget = _save->getTileCoords(unitToWalkTo->getTileLastSpotted(_unit->getFaction()));
+					action->finalFacing = _save->getTileEngine()->getDirectionTo(travelTarget, faceTarget);
+				}
+				if (_traceAI)
+					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED ambush staging unit=" << _unit->getId()
+						<< " staging=" << travelTarget
+						<< " facing=" << action->finalFacing;
 			}
-			if (_traceAI)
-				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED ambush staging unit=" << _unit->getId()
-					<< " staging=" << travelTarget
-					<< " facing=" << action->finalFacing;
 		}
-	}
-	if (_unit->isSneakyRuntime() && !IAmPureMelee && bestAttackScore <= 0 && bestSneakyRangedStagingScore > 0)
-	{
-		travelTarget = bestSneakyRangedStagingPosition;
-		shouldEndTurnAfterMove = true;
+		else if (_unit->isSneakyRuntime() && !IAmPureMelee && bestAttackScore <= 0 && bestSneakyRangedStagingScore > 0)
+		{
+			travelTarget = bestSneakyRangedStagingPosition;
+			shouldEndTurnAfterMove = true;
 		// Pandi: face towards the target so the unit is ready to fire next turn.
 		if (unitToWalkTo)
 		{
