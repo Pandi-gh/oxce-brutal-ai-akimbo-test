@@ -3743,8 +3743,8 @@ void AIModule::brutalThink(BattleAction* action)
 			Tile* candTile = _save->getTile(cand);
 			if (!candTile || candTile->getDangerous() || candTile->getFire()) continue;
 			if (candTile->hasNoFloor() && _unit->getMovementType() != MT_FLY) continue;
-			const int moveTU = ambushPnf->getTUCost(false).time;
-			const int moveEnergy = ambushPnf->getTUCost(false).energy;
+			const int moveTU = tuCostToReachPosition(cand, _allPathFindingNodes);
+			const int moveEnergy = tuCostToReachPosition(cand, _allPathFindingNodes, NULL, false, true);
 			if (moveTU < 0 || moveTU > _unit->getTimeUnits()) continue;
 			if (moveEnergy > _unit->getEnergy()) continue;
 			const bool hidden = !isPositionVisibleToEnemy(cand, true);
@@ -3762,9 +3762,22 @@ void AIModule::brutalThink(BattleAction* action)
 			else if (distToTarget <= weapRange + 4.0f) score += 400.0f - (distToTarget - weapRange) * 80.0f;
 			score += (_unit->getTimeUnits() - moveTU) * 3.0f;
 			score += getCoverValue(candTile, _unit, 2) * 5.0f;
+				if (_traceAI && score > sneakyRangedAmbushScore && score > 2000.0f)
+				{
+					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED ambush candidate unit=" << _unit->getId()
+						<< " cand=" << cand
+						<< " score=" << score
+						<< " hidden=" << (hidden ? 1 : 0)
+						<< " hasLOS=" << (hasLOS ? 1 : 0)
+						<< " dist=" << distToTarget
+						<< " weapRange=" << weapRange
+						<< " moveTU=" << moveTU
+						<< " cover=" << getCoverValue(candTile, _unit, 2);
+				}
 			if (score > sneakyRangedAmbushScore)
 			{
 				sneakyRangedAmbushScore = score;
+				sneakyRangedAmbushDirectAttack = false;
 				sneakyRangedAmbushPosition = cand;
 				sneakyRangedAmbushMoveTU = moveTU;
 				sneakyRangedAmbushHidden = hidden;
