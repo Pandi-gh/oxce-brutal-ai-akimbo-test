@@ -435,9 +435,13 @@ void BattlescapeGame::handleAI(BattleUnit *unit)
 		auto* targetTile = _save->getTile(action.target);
 		if (targetTile)
 		{
+			// Pandi: use the move mode the AI already decided on (wantToRun() sets
+			// action->run in AIModule). Re-querying wantToRun() here ignores that
+			// decision and can make a fresh unit walk because its energy/TU ratio is
+			// exactly at the threshold.
 			BattleActionMove bam = BAM_NORMAL;
-			if (Options::strafe && action.actor->isBrutal() && action.actor->getAIModule()->wantToRun())
-				bam = BAM_RUN;
+			if (Options::strafe && action.actor->isBrutal())
+				bam = action.run ? BAM_RUN : BAM_NORMAL;
 			_save->getPathfinding()->calculate(action.actor, action.target, bam);
 		}
 		if (_save->getPathfinding()->getStartDirection() != -1)
