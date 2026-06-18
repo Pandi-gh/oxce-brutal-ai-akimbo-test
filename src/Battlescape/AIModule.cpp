@@ -3889,7 +3889,10 @@ void AIModule::brutalThink(BattleAction* action)
 				hasLOS = _save->getTileEngine()->canTargetUnit(&originVoxel, unitToWalkTo->getTile(), nullptr, _unit, false);
 				if (!hasLOS) hasLOS = clearSight(cand, targetPosition);
 
-					const bool directAttack = hasLOS && canReserveShot;
+					// Pandi: do not take clown-shot "direct ambush" through a pinhole far
+					// beyond the weapon's practical range. If it has LoS but is outside the
+					// close threat band, treat it as a possible staging/approach tile instead.
+					const bool directAttack = hasLOS && canReserveShot && distToTarget <= weapRange + 1.5f;
 					const float cover = getCoverValue(candTile, _unit, 2);
 					// Staging should be an approach ambush, not a random hidden tile. Require
 					// actual progress unless already very close to the target's last known zone.
@@ -5586,6 +5589,14 @@ if (_traceAI)
 		}
 			action->type = BA_WALK;
 			action->run = sneakyRangedDirectWalk ? (sneakyRangedMoveMode == BAM_RUN) : (sneakyMeleeAssaultDirectWalk ? (sneakyMeleeAssaultMoveMode == BAM_RUN) : wantToRun());
+			if (_traceAI && sneakyRangedDirectWalk)
+			{
+				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED final walk flags unit=" << _unit->getId()
+					<< " run=" << (action->run ? 1 : 0)
+					<< " sneak=" << (action->sneak ? 1 : 0)
+					<< " strafe=" << (action->strafe ? 1 : 0)
+					<< " getMoveType=" << (int)action->getMoveType();
+			}
 	} else
 	{
 		tryToPickUpGrenade(_unit->getTile(), action);
