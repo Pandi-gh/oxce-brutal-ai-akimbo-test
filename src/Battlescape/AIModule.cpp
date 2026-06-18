@@ -3790,6 +3790,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " dangerous=" << (candTile && candTile->getDangerous() ? 1 : 0)
 						<< " fire=" << (candTile && candTile->getFire() ? 1 : 0)
 						<< " noFloor=" << (candTile && candTile->hasNoFloor() ? 1 : 0)
+						<< " tileVisible=" << (candTile ? candTile->getVisible() : -999)
 						<< " moveTU=" << moveTU
 						<< " moveEnergy=" << moveEnergy
 						<< " remTU=" << remainingTU
@@ -3797,6 +3798,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " reserveTU=" << minShotTU
 						<< " reserveEnergy=" << minShotEnergy
 						<< " hidden=" << (hidden ? 1 : 0)
+						<< " losVisible=" << (losVisibleToEnemy ? 1 : 0)
 						<< " hasLOS=" << (hasLOS ? 1 : 0)
 						<< " currentDist=" << currentDistToTarget
 						<< " dist=" << distToTarget
@@ -3872,8 +3874,14 @@ void AIModule::brutalThink(BattleAction* action)
 				const int remainingTU = _unit->getTimeUnits() - moveTU;
 				const int remainingEnergy = _unit->getEnergy() - moveEnergy;
 				const bool canReserveShot = remainingTU >= minShotTU && remainingEnergy >= minShotEnergy;
-				const bool hidden = !isPositionVisibleToEnemy(cand, true);
-				const float distToTarget = Position::distance(cand, targetPosition);
+					// Pandi: for Sneaky ranged staging use the same visibility source as
+					// Sneaky pathfinding itself: player-visible tile state. The synthetic
+					// tile LOS check can disagree with current FOV (e.g. watched (45,32,0):
+					// Tile::visible=0 but isPositionVisibleToEnemy(..., true)=true), causing
+					// valid hidden approach/ambush tiles to be rejected as notHidden.
+					const bool hidden = candTile->getVisible() <= 0;
+					const bool losVisibleToEnemy = isPositionVisibleToEnemy(cand, true);
+					const float distToTarget = Position::distance(cand, targetPosition);
 				const float progress = currentDistToTarget - distToTarget;
 
 				bool hasLOS = false;
