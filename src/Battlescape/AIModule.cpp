@@ -3737,15 +3737,30 @@ void AIModule::brutalThink(BattleAction* action)
 		considerShot(BA_AUTOSHOT);
 		considerShot(BA_AIMEDSHOT);
 		if (_unit->isAkimbo()) considerShot(BA_AKIMBOSHOT);
+		const bool ambushCanRun = wantToRun();
+		const BattleActionMove ambushMoveMode = ambushCanRun ? BAM_RUN : BAM_NORMAL;
 		for (auto ambushPnf : _allPathFindingNodes)
 		{
 			Position cand = ambushPnf->getPosition();
 			Tile* candTile = _save->getTile(cand);
 			if (!candTile || candTile->getDangerous() || candTile->getFire()) continue;
 			if (candTile->hasNoFloor() && _unit->getMovementType() != MT_FLY) continue;
-			const int moveTU = tuCostToReachPosition(cand, _allPathFindingNodes);
-			const int moveEnergy = tuCostToReachPosition(cand, _allPathFindingNodes, NULL, false, true);
-			if (moveTU < 0 || moveTU > _unit->getTimeUnits()) continue;
+			// Pandi: cheap pre-filter using non-Sneaky _allPathFindingNodes cost.
+			// This avoids running A* for obviously unreachable candidates.
+			const int cheapMoveTU = tuCostToReachPosition(cand, _allPathFindingNodes);
+			if (cheapMoveTU < 0 || cheapMoveTU > _unit->getTimeUnits()) continue;
+			const int cheapMoveEnergy = tuCostToReachPosition(cand, _allPathFindingNodes, NULL, false, true);
+			if (cheapMoveEnergy > _unit->getEnergy()) continue;
+			// Pandi: real Sneaky path cost with the actual move mode (RUN/Normal).
+			// _allPathFindingNodes is computed without Sneaky penalty, so its TU
+			// underestimates the cost and can pick unreachable staging positions.
+			_save->getPathfinding()->calculate(_unit, cand, ambushMoveMode, 0, _unit->getTimeUnits());
+			const bool pathFound = _save->getPathfinding()->getStartDirection() != -1;
+			const int moveTU = pathFound ? _save->getPathfinding()->getTotalTUCost() : INT_MAX;
+			const int moveEnergy = pathFound ? _save->getPathfinding()->getTotalEnergyCost() : INT_MAX;
+			_save->getPathfinding()->abortPath();
+			if (!pathFound) continue;
+			if (moveTU > _unit->getTimeUnits()) continue;
 			if (moveEnergy > _unit->getEnergy()) continue;
 			const bool hidden = !isPositionVisibleToEnemy(cand, true);
 			const float distToTarget = Position::distance(cand, targetPosition);
@@ -3771,6 +3786,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " hasLOS=" << (hasLOS ? 1 : 0)
 						<< " dist=" << distToTarget
 						<< " weapRange=" << weapRange
+						<< " moveMode=" << (int)ambushMoveMode
 						<< " moveTU=" << moveTU
 						<< " cover=" << getCoverValue(candTile, _unit, 2);
 				}
@@ -3798,6 +3814,7 @@ void AIModule::brutalThink(BattleAction* action)
 				<< " pos=" << sneakyRangedAmbushPosition
 				<< " score=" << sneakyRangedAmbushScore
 				<< " hidden=" << (sneakyRangedAmbushHidden ? 1 : 0)
+				<< " moveMode=" << (int)ambushMoveMode
 				<< " moveTU=" << sneakyRangedAmbushMoveTU
 				<< " shotTU=" << sneakyRangedAmbushShotTU
 				<< " directAttack=" << (sneakyRangedAmbushDirectAttack ? 1 : 0)
@@ -5081,6 +5098,8 @@ if (_traceAI)
 				}
 	// Pandi: проактивный Sneaky ambush — если нашли скрытую позицию, используем её.
 	if (_unit->isSneakyRuntime() && !IAmPureMelee && sneakyRangedAmbushScore > 0 &&
+		sneakyRangedAmbushPosition != myPos &&
+		sneakyRangedAmbushMoveTU <= _unit->getTimeUnits() &&
 		(bestAttackScore <= 0 || (sneakyRangedAmbushDirectAttack && sneakyRangedAmbushHidden)))
 	{
 		travelTarget = sneakyRangedAmbushPosition;
@@ -7679,10 +7698,11 @@ bool AIModule::wantToRun()
 {
 	if (!Options::strafe || !_unit->getArmor()->allowsRunning())
 		return false;
-	if (_unit->getTimeUnits() > 0 && (float) _unit->getEnergy() / _unit->getTimeUnits() > (float)_unit->getArmor()->getMoveCostRun().EnergyPercent / _unit->getArmor()->getMoveCostRun().TimePercent)
+	const float runRatio = (float)_unit->getArmor()->getMoveCostRun().EnergyPercent / _unit->getArmor()->getMoveCostRun().TimePercent;
+	if (_unit->getTimeUnits() > 0 && (float) _unit->getEnergy() / _unit->getTimeUnits() >= runRatio * 0.98f)
 	{
 		if (_traceAI)
-			Log(LOG_INFO) << "Wants to run since energy is decent: " << (float)_unit->getEnergy() / _unit->getTimeUnits() << " / " << (float)_unit->getArmor()->getMoveCostRun().EnergyPercent / _unit->getArmor()->getMoveCostRun().TimePercent;
+			Log(LOG_INFO) << "Wants to run since energy is decent: " << (float)_unit->getEnergy() / _unit->getTimeUnits() << " / " << runRatio;
 		return true;
 	}
 	return false;
