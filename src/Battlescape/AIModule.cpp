@@ -3674,22 +3674,7 @@ void AIModule::brutalThink(BattleAction* action)
 	// Pandi: for Sneaky melee; immediate attack tiles visible to enemies
 	// should lose to low-visibility approach positions when possible.
 	bool bestAttackPositionVisibleToEnemy = false;
-	// Pandi: DynamicTraits Sneaky ranged staging. If a visible/short-range
-	// attack tile is too expensive under real Sneaky pathing to leave time and
-	// energy for a shot, keep a safe approach tile instead.
-	float bestSneakyRangedStagingScore = 0.0f;
-	Position bestSneakyRangedStagingPosition = myPos;
-	Position bestSneakyRangedRejectedAttackPosition = myPos;
-	int bestSneakyRangedStagingMoveTU = 0;
-	int bestSneakyRangedStagingShotTU = 0;
-	bool bestSneakyRangedStagingVisible = false;
-	// Pandi: проактивный Sneaky Ranged ambush (ищет скрытые позиции ДО основного цикла)
-	bool sneakyRangedAmbushDirectAttack = false;
-	Position sneakyRangedAmbushPosition = myPos;
-	float sneakyRangedAmbushScore = 0.0f;
-	int sneakyRangedAmbushMoveTU = 0;
-	int sneakyRangedAmbushShotTU = 0;
-	bool sneakyRangedAmbushHidden = false;
+	// (старые переменные Sneaky staging удалены — теперь используется новая надстройка выше)
 	// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
 	// strongest true flanking attack candidate separately from Brutal's normal
 	// bestAttackPosition so we can see whether a viable flank existed.
@@ -3723,132 +3708,167 @@ void AIModule::brutalThink(BattleAction* action)
 	}
 	if (!_unit->getVisibleUnits()->empty() || contact)
 		saveDistance = false;
-		// Pandi: проактивный Sneaky ranged ambush search (оптимизированная версия).
-	// Ищем скрытые позиции по трёхуровневой логике:
-	// 1. Прямой ambush (move + shot в этот ход)
-	// 2. Staging (скрытая позиция рядом с целью с ОД на реактивный огонь)
-	// 3. Safe cover (хорошее укрытие недалеко)
-	if (_unit->isSneakyRuntime() && !IAmPureMelee && unitToWalkTo && _attackAction.weapon)
+		// =====================================================================
+	// Pandi: SNEAKY RANGED — ОПЦИОНАЛЬНАЯ НАДСТРОЙКА (выполняется ОДИН РАЗ в начале хода)
+	// =====================================================================
+	// Логика:
+	// 1. Tier 1: Прямой ambush (move + shot в этот ход)
+	// 2. Tier 2: Staging (скрытая позиция рядом с целью с ОД на реактивный огонь)
+	// 3. Если ничего не подошло — отдаём управление обычному Brutal AI
+	//
+	// Выполняется только в начале хода (TU == maxTU) и только для ranged юнитов.
+	// =====================================================================
+	if (_unit->isSneakyRuntime() && !IAmPureMelee && unitToWalkTo && _attackAction.weapon &&
+	    _unit->getTimeUnits() == getMaxTU(_unit))   // <-- только в начале хода
 	{
 		const float weapRange = maxExtenderRangeWith(_unit, getMaxTU(_unit));
 		int minShotTU = INT_MAX;
-		int minShotEnergy = 0;
 		auto considerShot = [&](BattleActionType t) {
 			BattleActionCost c(t, _unit, _attackAction.weapon);
-			if (c.Time > 0 && c.Time < minShotTU) { minShotTU = c.Time; minShotEnergy = c.Energy; }
+			if (c.Time > 0 && c.Time < minShotTU) minShotTU = c.Time;
 		};
 		considerShot(BA_SNAPSHOT);
 		considerShot(BA_AUTOSHOT);
 		considerShot(BA_AIMEDSHOT);
 		if (_unit->isAkimbo()) considerShot(BA_AKIMBOSHOT);
 
-		// Определяем предпочтительный режим движения (проверяем после выбора позиции)
 		const bool canRun = wantToRun();
+		const BattleActionMove moveMode = canRun ? BAM_RUN : BAM_NORMAL;
 
-		// Ограничиваем поиск только позициями ближе к цели (сильно снижает количество кандидатов)
-		const float currentDistToTarget = Position::distance(myPos, targetPosition);
-		const int maxCandidates = 80; // жёсткий лимит для производительности
+		const float currentDist = Position::distance(myPos, targetPosition);
+		const int maxCandidates = 60;
+
+		Position bestTier1 = myPos;      // Прямой ambush
+		float    bestTier1Score = 0.0f;
+		int      bestTier1MoveTU = 0;
+		int      bestTier1ShotTU = 0;
+
+		Position bestTier2 = myPos;      // Staging
+		float    bestTier2Score = 0.0f;
+		int      bestTier2MoveTU = 0;
 
 		int candidatesChecked = 0;
 
-		for (auto ambushPnf : _allPathFindingNodes)
+		for (auto* node : _allPathFindingNodes)
 		{
 			if (candidatesChecked >= maxCandidates) break;
 
-			Position cand = ambushPnf->getPosition();
-			Tile* candTile = _save->getTile(cand);
-			if (!candTile || candTile->getDangerous() || candTile->getFire()) continue;
-			if (candTile->hasNoFloor() && _unit->getMovementType() != MT_FLY) continue;
+			Position cand = node->getPosition();
+			Tile* tile = _save->getTile(cand);
+			if (!tile || tile->getDangerous() || tile->getFire()) continue;
+			if (tile->hasNoFloor() && _unit->getMovementType() != MT_FLY) continue;
 
-			// Пропускаем позиции дальше от цели, чем текущая
-			const float candDist = Position::distance(cand, targetPosition);
-			if (candDist > currentDistToTarget + 2.0f) continue;
+			// Пропускаем позиции дальше от цели
+			if (Position::distance(cand, targetPosition) > currentDist + 3.0f) continue;
 
 			candidatesChecked++;
 
 			// Pre-filter
-			const int cheapMoveTU = tuCostToReachPosition(cand, _allPathFindingNodes);
-			if (cheapMoveTU < 0 || cheapMoveTU > _unit->getTimeUnits()) continue;
-			const int cheapMoveEnergy = tuCostToReachPosition(cand, _allPathFindingNodes, NULL, false, true);
-			if (cheapMoveEnergy > _unit->getEnergy()) continue;
+			int cheapTU = tuCostToReachPosition(cand, _allPathFindingNodes);
+			if (cheapTU < 0 || cheapTU > _unit->getTimeUnits()) continue;
 
-			// Реальная Sneaky-стоимость (с правильным режимом движения)
-			const BattleActionMove moveMode = canRun ? BAM_RUN : BAM_NORMAL;
+			// Реальная стоимость
 			_save->getPathfinding()->calculate(_unit, cand, moveMode, 0, _unit->getTimeUnits());
-			const bool pathFound = _save->getPathfinding()->getStartDirection() != -1;
-			const int moveTU = pathFound ? _save->getPathfinding()->getTotalTUCost() : INT_MAX;
-			const int moveEnergy = pathFound ? _save->getPathfinding()->getTotalEnergyCost() : INT_MAX;
+			if (_save->getPathfinding()->getStartDirection() == -1) { _save->getPathfinding()->abortPath(); continue; }
+
+			int moveTU   = _save->getPathfinding()->getTotalTUCost();
+			int moveEnergy = _save->getPathfinding()->getTotalEnergyCost();
 			_save->getPathfinding()->abortPath();
 
-			if (!pathFound || moveTU > _unit->getTimeUnits() || moveEnergy > _unit->getEnergy()) continue;
+			if (moveTU > _unit->getTimeUnits() || moveEnergy > _unit->getEnergy()) continue;
 
-			const bool hidden = !isPositionVisibleToEnemy(cand, true);
-			const float distToTarget = Position::distance(cand, targetPosition);
-			if (!hidden && distToTarget > weapRange + 4.0f) continue;
+			bool hidden = !isPositionVisibleToEnemy(cand, true);
+			float dist  = Position::distance(cand, targetPosition);
+			if (!hidden && dist > weapRange + 4.0f) continue;
 
-			bool hasLOS = false;
-			Position originVoxel = cand.toVoxel() + Position(8, 8, 0);
-			originVoxel.z += _unit->getHeight() + _unit->getFloatHeight() - candTile->getTerrainLevel() - 4;
-			hasLOS = _save->getTileEngine()->canTargetUnit(&originVoxel, unitToWalkTo->getTile(), nullptr, _unit, false);
-			if (!hasLOS) hasLOS = clearSight(cand, targetPosition);
+			bool hasLOS = _save->getTileEngine()->canTargetUnit(
+				&(cand.toVoxel() + Position(8,8,_unit->getHeight() + _unit->getFloatHeight() - tile->getTerrainLevel() - 4)),
+				unitToWalkTo->getTile(), nullptr, _unit, false) || clearSight(cand, targetPosition);
 
-			// === СКОРИНГ С БОНУСОМ ЗА КАЧЕСТВО ДОРОГИ ===
+			// === СКОРИНГ ===
 			float score = 0.0f;
-
-			// Базовые бонусы
 			if (hidden) score += 3000.0f;
 			if (hasLOS) score += 1500.0f;
 
-			// Близость к цели (очень важно!)
-			if (distToTarget <= weapRange + 1.0f) score += 1200.0f;
-			else if (distToTarget <= weapRange + 4.0f) score += 600.0f - (distToTarget - weapRange) * 60.0f;
+			if (dist <= weapRange + 1.0f) score += 1000.0f;
+			else if (dist <= weapRange + 4.0f) score += 500.0f;
 
-			// Бонус за оставшиеся TU (чем больше — тем лучше)
-			score += (_unit->getTimeUnits() - moveTU) * 4.0f;
+			score += (_unit->getTimeUnits() - moveTU) * 3.5f;
+			score += getCoverValue(tile, _unit, 2) * 5.0f;
 
-			// Бонус за качество дороги (разница между cheap и реальной стоимостью)
-			// Чем меньше penalty за Sneaky — тем лучше (ровная дорога вместо травы)
-			const float pathEfficiency = (cheapMoveTU > 0) ? (float)moveTU / cheapMoveTU : 1.0f;
-			if (pathEfficiency < 1.3f) score += 400.0f;        // отличная дорога
-			else if (pathEfficiency < 1.6f) score += 200.0f;   // приемлемо
-			else score -= 150.0f;                               // трава/штраф
+			// Бонус за качество дороги
+			float efficiency = (cheapTU > 0) ? float(moveTU) / cheapTU : 1.0f;
+			if (efficiency < 1.25f) score += 350.0f;
+			else if (efficiency < 1.5f) score += 150.0f;
 
-			// Бонус за укрытие
-			score += getCoverValue(candTile, _unit, 2) * 6.0f;
-
-			// === РЕШЕНИЕ: ПРЯМОЙ AMBUSH ИЛИ STAGING ===
-			bool canDirectAttack = (minShotTU != INT_MAX && moveTU + minShotTU <= _unit->getTimeUnits());
-
-			if (score > sneakyRangedAmbushScore)
+			// === TIER 1: Прямой ambush ===
+			if (minShotTU != INT_MAX && moveTU + minShotTU <= _unit->getTimeUnits())
 			{
-				sneakyRangedAmbushScore = score;
-				sneakyRangedAmbushPosition = cand;
-				sneakyRangedAmbushMoveTU = moveTU;
-				sneakyRangedAmbushHidden = hidden;
-
-				if (canDirectAttack)
+				float tier1Score = score + 800.0f; // сильный бонус за возможность выстрелить сразу
+				if (tier1Score > bestTier1Score)
 				{
-					sneakyRangedAmbushShotTU = minShotTU;
-					sneakyRangedAmbushDirectAttack = true;
+					bestTier1Score   = tier1Score;
+					bestTier1        = cand;
+					bestTier1MoveTU  = moveTU;
+					bestTier1ShotTU  = minShotTU;
 				}
-				else
-				{
-					sneakyRangedAmbushShotTU = minShotTU;
-					sneakyRangedAmbushDirectAttack = false;
-				}
+			}
+			// === TIER 2: Staging ===
+			else if (score > bestTier2Score)
+			{
+				bestTier2Score  = score;
+				bestTier2       = cand;
+				bestTier2MoveTU = moveTU;
 			}
 		}
 
-		// Логи только при значимом результате (сильно уменьшает спам)
-		if (_traceAI && sneakyRangedAmbushScore > 2000.0f)
+		// === ПРИНИМАЕМ РЕШЕНИЕ ===
+		bool planFound = false;
+
+		// Приоритет Tier 1
+		if (bestTier1Score > 2500.0f)
 		{
-			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED search unit=" << _unit->getId()
-				<< " best=" << sneakyRangedAmbushPosition
-				<< " score=" << sneakyRangedAmbushScore
-				<< " direct=" << (sneakyRangedAmbushDirectAttack ? 1 : 0)
-				<< " moveTU=" << sneakyRangedAmbushMoveTU
-				<< " candidates=" << candidatesChecked;
+			travelTarget = bestTier1;
+			_allowedToCheckAttack = true;
+			planFound = true;
+
+			if (_traceAI)
+				Log(LOG_INFO) << "[SNEAKY] TIER1 direct ambush pos=" << travelTarget
+					<< " moveTU=" << bestTier1MoveTU << " shotTU=" << bestTier1ShotTU;
 		}
+		// Tier 2
+		else if (bestTier2Score > 2200.0f)
+		{
+			travelTarget = bestTier2;
+			shouldEndTurnAfterMove = true;
+			planFound = true;
+
+			if (unitToWalkTo)
+			{
+				Position face = unitToWalkTo->getPosition();
+				if (!_unit->isCheatOnMovement())
+					face = _save->getTileCoords(unitToWalkTo->getTileLastSpotted(_unit->getFaction()));
+				action->finalFacing = _save->getTileEngine()->getDirectionTo(travelTarget, face);
+			}
+
+			if (_traceAI)
+				Log(LOG_INFO) << "[SNEAKY] TIER2 staging pos=" << travelTarget
+					<< " moveTU=" << bestTier2MoveTU << " score=" << bestTier2Score;
+		}
+
+		if (planFound)
+		{
+			// Нашли план — выходим, не даём обычному Brutal AI перехватить управление
+			if (_traceAI)
+				Log(LOG_INFO) << "[SNEAKY] Plan accepted. Skipping normal Brutal scoring.";
+			return;   // <-- ВАЖНО: выходим из brutalThink
+		}
+
+		// === TIER 3: Хорошее укрытие (если ничего не нашли) ===
+		// Если юнит Sneaky, но не смог найти ambush/staging — он всё равно
+		// должен вести себя осторожнее обычного Brutal AI.
+		// Для этого мы просто даём небольшой бонус greatCoverScore ниже в коде.
+		// Пока оставляем как есть — Brutal AI сам выберет хорошее укрытие.
 	}
 if (_traceAI)
 		Log(LOG_INFO) << "I have last been seen: " << _unit->getTurnsSinceSeen(_targetFaction);
@@ -4395,12 +4415,7 @@ if (_traceAI)
 								const float oldAttackScore = attackScore;
 								attackScore = 0.0f;
 								me.attackPotential = 0.0f;
-								// Pandi: для Sneaky ranged — если уже нашли скрытую ambush, штрафуем обычную атаку.
-								if (_unit->isSneakyRuntime() && !IAmPureMelee && attackScore > 0 && sneakyRangedAmbushScore > 0)
-								{
-									attackScore *= 0.3f;
-									me.attackPotential *= 0.3f;
-								}
+							// (старая ссылка на sneakyRangedAmbushScore удалена)
 							}
 						}
 					}
