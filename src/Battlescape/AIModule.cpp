@@ -3695,6 +3695,7 @@ void AIModule::brutalThink(BattleAction* action)
 	// enough TU/Energy after movement for a reaction/snapshot shot. Otherwise the
 	// unit can correctly choose an ambush tile and then spend itself down to 0-10 TU.
 	bool sneakyRangedReserveShotAfterMove = false;
+	bool sneakyRangedForceEndAfterMove = false;
 	int sneakyRangedReserveShotTU = 0;
 	int sneakyRangedReserveShotEnergy = 0;
 	// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
@@ -3769,6 +3770,8 @@ void AIModule::brutalThink(BattleAction* action)
 			int ambushRejectedNotHidden = 0;
 			int ambushRejectedNoReserve = 0;
 			int ambushRejectedNoProgress = 0;
+			int ambushRejectedNoCover = 0;
+			int ambushRejectedNoNextTurnThreat = 0;
 			bool watchedCandidateSeen = false;
 
 			auto logWatched = [&](const char* reason, const Position& cand, Tile* candTile, int moveTU, int moveEnergy,
@@ -3849,13 +3852,21 @@ void AIModule::brutalThink(BattleAction* action)
 				hasLOS = _save->getTileEngine()->canTargetUnit(&originVoxel, unitToWalkTo->getTile(), nullptr, _unit, false);
 				if (!hasLOS) hasLOS = clearSight(cand, targetPosition);
 
-				const bool directAttack = hasLOS && canReserveShot;
-				// Staging should be an approach ambush, not a random hidden tile. Require
-				// actual progress unless already very close to the target's last known zone.
-				const bool enoughProgressForStaging = progress >= 1.5f || distToTarget <= 8.0f;
-				const bool stagingCandidate = hidden && canReserveShot && enoughProgressForStaging;
+					const bool directAttack = hasLOS && canReserveShot;
+					const float cover = getCoverValue(candTile, _unit, 2);
+					// Staging should be an approach ambush, not a random hidden tile. Require
+					// actual progress unless already very close to the target's last known zone.
+					const bool enoughProgressForStaging = progress >= 1.5f || distToTarget <= 8.0f;
+					// Pandi: do not stage in the middle of an empty hidden field. If the unit is
+					// not attacking this turn, the ambush tile must have at least some real cover.
+					const bool hasAmbushCover = cover > 0.0f;
+					// Pandi: staging should create a next-turn threat. For short weapons this
+					// prevents running to a distant hidden field with no way to attack next turn.
+					const float maxUsefulStagingDist = std::max(10.0f, weapRange * 2.0f + 3.0f);
+					const bool closeEnoughForNextTurnThreat = distToTarget <= maxUsefulStagingDist;
+					const bool stagingCandidate = hidden && canReserveShot && enoughProgressForStaging && hasAmbushCover && closeEnoughForNextTurnThreat;
 
-				if (!directAttack && !hidden)
+					if (!directAttack && !hidden)
 				{
 					++ambushRejectedNotHidden;
 					logWatched("rejectNotHidden", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
@@ -3867,15 +3878,26 @@ void AIModule::brutalThink(BattleAction* action)
 					logWatched("rejectNoShotReserve", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
 					continue;
 				}
-				if (!directAttack && !enoughProgressForStaging)
-				{
-					++ambushRejectedNoProgress;
-					logWatched("rejectNoProgress", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
-					continue;
-				}
+					if (!directAttack && !enoughProgressForStaging)
+					{
+						++ambushRejectedNoProgress;
+						logWatched("rejectNoProgress", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
+						continue;
+					}
+					if (!directAttack && !hasAmbushCover)
+					{
+						++ambushRejectedNoCover;
+						logWatched("rejectNoCover", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
+						continue;
+					}
+					if (!directAttack && !closeEnoughForNextTurnThreat)
+					{
+						++ambushRejectedNoNextTurnThreat;
+						logWatched("rejectNoNextTurnThreat", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
+						continue;
+					}
 
-				const float cover = getCoverValue(candTile, _unit, 2);
-				float score = 0.0f;
+					float score = 0.0f;
 				// Hidden is important, but no longer a 3000-point trump card.
 				score += hidden ? 1200.0f : -900.0f;
 				if (hasLOS) score += 900.0f;
@@ -3991,9 +4013,11 @@ void AIModule::brutalThink(BattleAction* action)
 					<< " badMoveTU=" << ambushRejectedMove
 					<< " badMoveEnergy=" << ambushRejectedEnergy
 					<< " notHidden=" << ambushRejectedNotHidden
-					<< " noReserve=" << ambushRejectedNoReserve
-					<< " noProgress=" << ambushRejectedNoProgress
-					<< " bestPos=" << sneakyRangedAmbushPosition
+						<< " noReserve=" << ambushRejectedNoReserve
+						<< " noProgress=" << ambushRejectedNoProgress
+						<< " noCover=" << ambushRejectedNoCover
+						<< " noNextTurnThreat=" << ambushRejectedNoNextTurnThreat
+						<< " bestPos=" << sneakyRangedAmbushPosition
 					<< " bestScore=" << sneakyRangedAmbushScore
 					<< " bestHidden=" << (sneakyRangedAmbushHidden ? 1 : 0)
 					<< " bestMoveTU=" << sneakyRangedAmbushMoveTU
@@ -5304,9 +5328,10 @@ if (_traceAI)
 	}
 	else if (_unit->isSneakyRuntime() && !IAmPureMelee && bestAttackScore <= 0 && bestSneakyRangedStagingScore > 1200.0f)
 	{
-		travelTarget = bestSneakyRangedStagingPosition;
-		shouldEndTurnAfterMove = true;
-		sneakyRangedReserveShotAfterMove = true;
+			travelTarget = bestSneakyRangedStagingPosition;
+			shouldEndTurnAfterMove = true;
+			sneakyRangedForceEndAfterMove = true;
+			sneakyRangedReserveShotAfterMove = true;
 			sneakyRangedReserveShotTU = bestSneakyRangedStagingShotTU;
 			sneakyRangedReserveShotEnergy = bestSneakyRangedStagingShotEnergy;
 			// Pandi: face towards the target so the unit is ready to fire/react next turn.
@@ -5583,9 +5608,9 @@ if (_traceAI)
 		if (_traceAI)
 			Log(LOG_INFO) << "Overruling facing towards direction that reveals most tiles: " << action->finalFacing;
 	}
-	if (!_unit->getVisibleUnits()->empty() || contact || _save->getTileEngine()->isNextToDoor(myTile))
-		shouldEndTurnAfterMove = false;
-	if (shouldEndTurnAfterMove)
+		if (!sneakyRangedForceEndAfterMove && (!_unit->getVisibleUnits()->empty() || contact || _save->getTileEngine()->isNextToDoor(myTile)))
+			shouldEndTurnAfterMove = false;
+		if (shouldEndTurnAfterMove)
 		_unit->setWantToEndTurn(true);
 }
 
