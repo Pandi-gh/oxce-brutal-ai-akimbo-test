@@ -3799,8 +3799,8 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " remEnergy=" << remainingEnergy
 						<< " reserveTU=" << minShotTU
 						<< " reserveEnergy=" << minShotEnergy
-							<< " hidden=" << (hidden ? 1 : 0)
-							<< " hasLOS=" << (hasLOS ? 1 : 0)
+						<< " hidden=" << (hidden ? 1 : 0)
+						<< " hasLOS=" << (hasLOS ? 1 : 0)
 						<< " currentDist=" << currentDistToTarget
 						<< " dist=" << distToTarget
 						<< " progress=" << progress
@@ -3872,9 +3872,14 @@ void AIModule::brutalThink(BattleAction* action)
 					continue;
 				}
 
-				const int remainingTU = _unit->getTimeUnits() - moveTU;
-				const int remainingEnergy = _unit->getEnergy() - moveEnergy;
-				const bool canReserveShot = remainingTU >= minShotTU && remainingEnergy >= minShotEnergy;
+					// Pandi: pathfinding Sneaky visibility penalty is a planning bias, not a
+					// real TU spend during UnitWalk. For RUN staging, use the lower movement
+					// component as a closer estimate of real post-move TU reserve; otherwise
+					// good run ambush tiles one step deeper look falsely unaffordable.
+					const int reserveMoveTU = (candidateMoveMode == BAM_RUN ? std::min(moveTU, moveEnergy) : moveTU);
+					const int remainingTU = _unit->getTimeUnits() - reserveMoveTU;
+					const int remainingEnergy = _unit->getEnergy() - moveEnergy;
+					const bool canReserveShot = remainingTU >= minShotTU && remainingEnergy >= minShotEnergy;
 					// Pandi: for Sneaky ranged staging use the same visibility source as
 					// Sneaky pathfinding itself: player-visible tile state. The synthetic
 					// tile LOS check can disagree with current FOV (e.g. watched (45,32,0):
@@ -3896,6 +3901,10 @@ void AIModule::brutalThink(BattleAction* action)
 					// close threat band, treat it as a possible staging/approach tile instead.
 					const bool directAttack = hasLOS && canReserveShot && distToTarget <= weapRange + 1.5f;
 					const float cover = getCoverValue(candTile, _unit, 2);
+					// Pandi: strict hidden uses current player FOV. For staging only, also
+					// allow a close covered corner that has no firing LOS yet: it is not a
+					// direct attack tile, but can be a better ambush pocket than one tile back.
+					const bool concealedForStaging = hidden || (cover > 0.5f && !hasLOS && distToTarget <= weapRange + 1.5f);
 					// Staging should be an approach ambush, not a random hidden tile. Require
 					// actual progress unless already very close to the target's last known zone.
 					const bool enoughProgressForStaging = progress >= 1.5f || distToTarget <= 8.0f;
@@ -3906,9 +3915,9 @@ void AIModule::brutalThink(BattleAction* action)
 					// Pandi: do not stage in the middle of an empty hidden field. If the tile is
 					// a close kill-zone for a short weapon, allow no formal cover; otherwise require cover.
 					const bool hasAmbushCover = cover > 0.0f || distToTarget <= weapRange + 1.5f;
-					const bool stagingCandidate = hidden && canReserveShot && enoughProgressForStaging && hasAmbushCover && closeEnoughForNextTurnThreat;
+					const bool stagingCandidate = concealedForStaging && canReserveShot && enoughProgressForStaging && hasAmbushCover && closeEnoughForNextTurnThreat;
 
-					if (!directAttack && !hidden)
+					if (!directAttack && !concealedForStaging)
 				{
 					++ambushRejectedNotHidden;
 					logWatched("rejectNotHidden", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, 0.0f, remainingTU, remainingEnergy);
@@ -3941,7 +3950,7 @@ void AIModule::brutalThink(BattleAction* action)
 
 					float score = 0.0f;
 				// Hidden is important, but no longer a 3000-point trump card.
-				score += hidden ? 1200.0f : -900.0f;
+					score += hidden ? 1200.0f : (concealedForStaging ? 1050.0f : -900.0f);
 				if (hasLOS) score += 900.0f;
 				if (directAttack) score += 1600.0f;
 				else if (stagingCandidate) score += 900.0f;
@@ -3958,8 +3967,8 @@ void AIModule::brutalThink(BattleAction* action)
 				score += cover * 9.0f;
 				// Prefer being inside/near weapon range, but do not let sniper range make
 				// the whole map equally attractive.
-				if (distToTarget <= weapRange + 1.0f) score += 350.0f;
-				else if (distToTarget <= weapRange + 4.0f) score += 150.0f - (distToTarget - weapRange) * 50.0f;
+					if (distToTarget <= weapRange + 1.0f) score += 350.0f + (weapRange + 1.0f - distToTarget) * 80.0f;
+					else if (distToTarget <= weapRange + 4.0f) score += 150.0f - (distToTarget - weapRange) * 50.0f;
 				else score -= (distToTarget - weapRange) * 120.0f;
 
 				logWatched(directAttack ? "acceptedDirectScored" : "acceptedStagingScored", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, score, remainingTU, remainingEnergy);
@@ -3970,6 +3979,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " cand=" << cand
 						<< " score=" << score
 						<< " hidden=" << (hidden ? 1 : 0)
+						<< " concealed=" << (concealedForStaging ? 1 : 0)
 						<< " losVisible=" << (losVisibleToEnemy ? 1 : 0)
 						<< " hasLOS=" << (hasLOS ? 1 : 0)
 							<< " direct=" << (directAttack ? 1 : 0)
