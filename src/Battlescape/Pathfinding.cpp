@@ -33,6 +33,26 @@
 namespace OpenXcom
 {
 
+namespace
+{
+
+// Pandi: single source of truth for "AI avoids player-visible tiles" path cost.
+// Both point-to-point A* and the Brutal AI reachable-node/Dijkstra map must use
+// the same predicate, otherwise the AI scores positions with one TU budget and
+// executes movement with another.
+static bool sneakyPathingActiveForUnit(const BattleUnit *unit)
+{
+	if (!unit) return false;
+	const bool dynMixed = (unit->getFaction() == FACTION_HOSTILE)
+		&& (Options::brutalAI == 3 || Options::brutalCivilians == 3);
+	const bool dynTraits = (unit->getFaction() == FACTION_HOSTILE)
+		&& (Options::brutalAI == 4 || Options::brutalCivilians == 4);
+	return (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
+		|| ((dynMixed || dynTraits) && unit->isSneakyRuntime());
+}
+
+} // anonymous namespace
+
 constexpr int Pathfinding::dir_x[Pathfinding::dir_max];
 constexpr int Pathfinding::dir_y[Pathfinding::dir_max];
 constexpr int Pathfinding::dir_z[Pathfinding::dir_max];
@@ -126,8 +146,7 @@ void Pathfinding::calculate(BattleUnit *unit, Position startPosition, Position e
 	// pathfinding hook, but the flag is duration-based instead of sticky.
 	const bool dynTraits = (unit->getFaction() == FACTION_HOSTILE)
 		&& (Options::brutalAI == 4 || Options::brutalCivilians == 4);
-	bool sneak = (Options::sneakyAI && unit->getFaction() == FACTION_HOSTILE && !unit->isBrutal())
-		|| ((dynMixed || dynTraits) && unit->isSneakyRuntime());
+	bool sneak = sneakyPathingActiveForUnit(unit);
 
 	// Pandi: Sneaky diagnostics. This helps verify whether debug/open-map FOV
 	// makes all candidate tiles visible and therefore neutralizes Sneaky routing.
@@ -1649,6 +1668,7 @@ std::vector<PathfindingNode*> Pathfinding::findReachablePathFindingNodes(BattleU
 	}
 
 	PathfindingCost costMax = {tuMax, energyMax};
+	const bool sneak = sneakyPathingActiveForUnit(unit);
 
 	if (alternateStart)
 	{
@@ -1697,6 +1717,21 @@ std::vector<PathfindingNode*> Pathfinding::findReachablePathFindingNodes(BattleU
 			auto r = getTUCost(currentPos, direction, unit, missileTarget, bam);
 			if (r.cost.time == INVALID_MOVE_COST) // Skip unreachable / blocked
 				continue;
+
+			// Pandi: Dynamic Sneaky must affect the Dijkstra reachable map too,
+			// not only point-to-point A*. Brutal AI scores attack/cover/ambush
+			// positions from this node map; if visible tiles are not penalized
+			// here, the planner believes it has enough TU for a shot and then
+			// the real Sneaky path spends more TU during execution.
+			if (sneak)
+			{
+				Tile* nextTile = _save->getTile(r.pos);
+				if (nextTile && nextTile->getVisible() > 0)
+				{
+					r.cost.time *= 2;
+				}
+			}
+
 			auto totalTuCost = currentNode->getTUCost(false) + r.cost + r.penalty;
 			if (!(totalTuCost <= costMax) && !entireMap) // Run out of TUs/Energy
 			{
