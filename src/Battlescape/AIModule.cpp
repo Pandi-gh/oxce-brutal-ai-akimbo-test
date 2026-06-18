@@ -3780,7 +3780,9 @@ void AIModule::brutalThink(BattleAction* action)
 			auto logWatched = [&](const char* reason, const Position& cand, Tile* candTile, int moveTU, int moveEnergy,
 				bool hidden, bool hasLOS, float distToTarget, float progress, float score, int remainingTU, int remainingEnergy)
 			{
-				if (_traceAI && cand == watchedSneakyCandidate)
+				if (_traceAI && cand.z == watchedSneakyCandidate.z
+					&& std::abs(cand.x - watchedSneakyCandidate.x) <= 1
+					&& std::abs(cand.y - watchedSneakyCandidate.y) <= 1)
 				{
 					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched candidate unit=" << _unit->getId()
 						<< " cand=" << cand
