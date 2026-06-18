@@ -5175,7 +5175,8 @@ if (_traceAI)
 		int assaultRejectedFit = 0;
 		int assaultRejectedPath = 0;
 		int assaultRejectedTU = 0;
-		int assaultRejectedEnergy = 0;
+			int assaultRejectedEnergy = 0;
+			int assaultRejectedBadSneakyAngle = 0;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
@@ -5205,7 +5206,11 @@ if (_traceAI)
 			const int hitTU = _unit->getActionTUs(BA_HIT, meleeWeapon).Time;
 				const int hitEnergy = _unit->getActionTUs(BA_HIT, meleeWeapon).Energy;
 			const int maxMoveTU = std::max(0, _unit->getTimeUnits() - hitTU);
-				assaultMoveMode = wantToRun() ? BAM_RUN : BAM_NORMAL;
+					// Pandi: Sneaky melee assault is a committed one-turn kill plan. Do not
+					// rely on generic wantToRun() stamina heuristics here: a side/window katana
+					// attack may only be reachable as RUN, while WALK leaves only the frontal
+					// reaction-bait tile. Full TU/Energy fit is still verified below.
+					assaultMoveMode = _unit->getArmor()->allowsRunning() ? BAM_RUN : BAM_NORMAL;
 			const int size = _unit->getArmor()->getSize();
 			const int sizeTarget = unitToWalkTo->getArmor()->getSize();
 			for (int z = -1; z <= 1; ++z)
@@ -5348,9 +5353,27 @@ if (_traceAI)
 						default:
 							break;
 						}
-						float score = sideScore * 1000.0f + (_unit->getTimeUnits() - moveTU - hitTU) * 5.0f - moveTU;
-						if (visible) score *= 0.65f;
-						if (_traceAI)
+							const bool badSneakyAngle = visible
+								&& (side == SIDE_FRONT || side == SIDE_LEFT_FRONT || side == SIDE_RIGHT_FRONT);
+							if (badSneakyAngle)
+							{
+								++assaultRejectedBadSneakyAngle;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=badSneakyAngle"
+										<< " side=" << (int)side
+										<< " visible=" << (visible ? 1 : 0)
+										<< " moveTU=" << moveTU
+										<< " hitTU=" << hitTU
+										<< " moveMode=" << (int)assaultMoveMode;
+								}
+								continue;
+							}
+							float score = sideScore * 1000.0f + (_unit->getTimeUnits() - moveTU - hitTU) * 5.0f - moveTU;
+							if (visible) score *= 0.65f;
+							if (_traceAI)
 						{
 							Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE candidate unit=" << _unit->getId()
 								<< " pos=" << candidate
@@ -5388,9 +5411,10 @@ if (_traceAI)
 						<< " badMeleeRange=" << assaultRejectedMeleeRange
 						<< " noFit=" << assaultRejectedFit
 						<< " noPath=" << assaultRejectedPath
-						<< " noTU=" << assaultRejectedTU
-						<< " noEnergy=" << assaultRejectedEnergy
-						<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
+							<< " noTU=" << assaultRejectedTU
+							<< " noEnergy=" << assaultRejectedEnergy
+							<< " badAngle=" << assaultRejectedBadSneakyAngle
+							<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
 	// Pandi: Sneaky ranged is an optional plan provider, not a blanket override.
