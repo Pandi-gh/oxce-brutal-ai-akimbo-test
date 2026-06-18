@@ -5177,7 +5177,6 @@ if (_traceAI)
 		int assaultRejectedTU = 0;
 			int assaultRejectedEnergy = 0;
 			int assaultRejectedBadSneakyAngle = 0;
-			int assaultRejectedReactionBait = 0;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
@@ -5362,23 +5361,10 @@ if (_traceAI)
 						}
 							const bool badSneakyAngle = visible
 								&& (side == SIDE_FRONT || side == SIDE_LEFT_FRONT || side == SIDE_RIGHT_FRONT);
-							if (visible && targetCanMeleeBack)
-							{
-								++assaultRejectedReactionBait;
-								if (_traceAI)
-								{
-									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
-										<< " pos=" << candidate
-										<< " reason=reactionBait"
-										<< " side=" << (int)side
-										<< " visible=" << (visible ? 1 : 0)
-										<< " targetCanMeleeBack=" << (targetCanMeleeBack ? 1 : 0)
-										<< " moveTU=" << moveTU
-										<< " hitTU=" << hitTU
-										<< " moveMode=" << (int)assaultMoveMode;
-								}
-								continue;
-							}
+							// Pandi: targetCanMeleeBack is diagnostic only. A side/rear melee target
+							// may counterattack after surviving, but the Sneaky attacker still gets
+							// the first swing if movement itself does not trigger a reaction. Do not
+							// reject good side/window attacks just because reverse melee range exists.
 							if (badSneakyAngle)
 							{
 								++assaultRejectedBadSneakyAngle;
@@ -5439,7 +5425,6 @@ if (_traceAI)
 							<< " noTU=" << assaultRejectedTU
 							<< " noEnergy=" << assaultRejectedEnergy
 							<< " badAngle=" << assaultRejectedBadSneakyAngle
-							<< " reactionBait=" << assaultRejectedReactionBait
 							<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
