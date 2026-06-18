@@ -3740,8 +3740,9 @@ void AIModule::brutalThink(BattleAction* action)
 	// no longer allowed to dominate the score and drag snipers into random corners.
 	if (_unit->isSneakyRuntime() && !IAmPureMelee && unitToWalkTo && _attackAction.weapon)
 	{
-		const Position watchedSneakyCandidate(45, 32, 0); // Pandi: temporary targeted diagnostic requested for this test case.
-		const float weapRange = maxExtenderRangeWith(_unit, getMaxTU(_unit));
+			const Position watchedSneakyCandidate(45, 32, 0); // Pandi: local diagnostic anchor; disabled by default below.
+			const bool traceWatchedSneakyCandidate = false;
+			const float weapRange = maxExtenderRangeWith(_unit, getMaxTU(_unit));
 		const float currentDistToTarget = Position::distance(myPos, targetPosition);
 		int minShotTU = INT_MAX;
 		int minShotEnergy = 0;
@@ -3780,9 +3781,9 @@ void AIModule::brutalThink(BattleAction* action)
 			auto logWatched = [&](const char* reason, const Position& cand, Tile* candTile, int moveTU, int moveEnergy,
 				bool hidden, bool hasLOS, float distToTarget, float progress, float score, int remainingTU, int remainingEnergy)
 			{
-				if (_traceAI && cand.z == watchedSneakyCandidate.z
-					&& std::abs(cand.x - watchedSneakyCandidate.x) <= 1
-					&& std::abs(cand.y - watchedSneakyCandidate.y) <= 1)
+					if (_traceAI && traceWatchedSneakyCandidate && cand.z == watchedSneakyCandidate.z
+						&& std::abs(cand.x - watchedSneakyCandidate.x) <= 1
+						&& std::abs(cand.y - watchedSneakyCandidate.y) <= 1)
 				{
 					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched candidate unit=" << _unit->getId()
 						<< " cand=" << cand
@@ -3896,25 +3897,28 @@ void AIModule::brutalThink(BattleAction* action)
 				hasLOS = _save->getTileEngine()->canTargetUnit(&originVoxel, unitToWalkTo->getTile(), nullptr, _unit, false);
 				if (!hasLOS) hasLOS = clearSight(cand, targetPosition);
 
-					// Pandi: do not take clown-shot "direct ambush" through a pinhole far
-					// beyond the weapon's practical range. If it has LoS but is outside the
-					// close threat band, treat it as a possible staging/approach tile instead.
-					const bool directAttack = hasLOS && canReserveShot && distToTarget <= weapRange + 1.5f;
-					const float cover = getCoverValue(candTile, _unit, 2);
+						// Pandi: cap tactical Sneaky ranges. maxExtenderRangeWith() can be 200 for
+						// sniper rifles; using that as a staging/ambush radius makes snipers sprint
+						// into open streets just because any hidden tile is "in range". Normal
+						// Brutal AI can handle long-range sniping; this layer is for close ambushes.
+						const float closeThreatRange = std::min(weapRange + 1.5f, 12.0f);
+						const float scoreRange = std::min(weapRange, 12.0f);
+						const bool directAttack = hasLOS && canReserveShot && distToTarget <= closeThreatRange;
+						const float cover = getCoverValue(candTile, _unit, 2);
 					// Pandi: strict hidden uses current player FOV. For staging only, also
 					// allow a close covered corner that has no firing LOS yet: it is not a
 					// direct attack tile, but can be a better ambush pocket than one tile back.
-					const bool concealedForStaging = hidden || (cover > 0.5f && !hasLOS && distToTarget <= weapRange + 1.5f);
+						const bool concealedForStaging = hidden || (cover > 0.5f && !hasLOS && distToTarget <= closeThreatRange);
 					// Staging should be an approach ambush, not a random hidden tile. Require
 					// actual progress unless already very close to the target's last known zone.
 					const bool enoughProgressForStaging = progress >= 1.5f || distToTarget <= 8.0f;
 					// Pandi: staging should create a next-turn threat. For short weapons this
 					// prevents running to a distant hidden field with no way to attack next turn.
-					const float maxUsefulStagingDist = std::max(10.0f, weapRange * 2.0f + 3.0f);
-					const bool closeEnoughForNextTurnThreat = distToTarget <= maxUsefulStagingDist;
+						const float maxUsefulStagingDist = std::max(10.0f, std::min(weapRange * 2.0f + 3.0f, 24.0f));
+						const bool closeEnoughForNextTurnThreat = distToTarget <= maxUsefulStagingDist;
 					// Pandi: do not stage in the middle of an empty hidden field. If the tile is
 					// a close kill-zone for a short weapon, allow no formal cover; otherwise require cover.
-					const bool hasAmbushCover = cover > 0.0f || distToTarget <= weapRange + 1.5f;
+						const bool hasAmbushCover = cover > 0.0f || distToTarget <= closeThreatRange;
 					const bool stagingCandidate = concealedForStaging && canReserveShot && enoughProgressForStaging && hasAmbushCover && closeEnoughForNextTurnThreat;
 
 					if (!directAttack && !concealedForStaging)
@@ -3967,9 +3971,9 @@ void AIModule::brutalThink(BattleAction* action)
 				score += cover * 9.0f;
 				// Prefer being inside/near weapon range, but do not let sniper range make
 				// the whole map equally attractive.
-					if (distToTarget <= weapRange + 1.0f) score += 350.0f + (weapRange + 1.0f - distToTarget) * 80.0f;
-					else if (distToTarget <= weapRange + 4.0f) score += 150.0f - (distToTarget - weapRange) * 50.0f;
-				else score -= (distToTarget - weapRange) * 120.0f;
+						if (distToTarget <= scoreRange + 1.0f) score += 350.0f + (scoreRange + 1.0f - distToTarget) * 80.0f;
+					else if (distToTarget <= weapRange + 4.0f) score += 0.0f; // long weapons are already in range; no huge Sneaky staging bonus.
+					else score -= (distToTarget - weapRange) * 120.0f;
 
 				logWatched(directAttack ? "acceptedDirectScored" : "acceptedStagingScored", cand, candTile, moveTU, moveEnergy, hidden, hasLOS, distToTarget, progress, score, remainingTU, remainingEnergy);
 
@@ -4022,8 +4026,8 @@ void AIModule::brutalThink(BattleAction* action)
 			}
 		}
 
-			if (_traceAI)
-			{
+				if (_traceAI && traceWatchedSneakyCandidate)
+				{
 					// Diagnostics from the already-built node maps; do not run pathfinding here
 					// because it would overwrite _nodes/_altNodes backing the scored maps.
 					int watchedTU = -1;
@@ -5545,12 +5549,16 @@ if (_traceAI)
 		improveItemization(myWeaponScore, action);
 	}
 
-	if (_traceAI)
-	{
-		Log(LOG_INFO) << "Brutal-AI wants to go from "
-					  << myPos
-					  << " to travel-target: " << travelTarget << " Remaining TUs: " << _unit->getTimeUnits() << " TU-cost: " << tuCostToReachPosition(travelTarget, _allPathFindingNodes);
-		Log(LOG_INFO) << "My range is: "<<maxExtenderRangeWith(_unit, _unit->getTimeUnits()) <<" IAmPureMelee: " << IAmPureMelee;
+		if (_traceAI)
+		{
+			const int displayedMoveTU = sneakyRangedDirectWalk
+				? (sneakyRangedAmbushDirectAttack ? sneakyRangedAmbushMoveTU : bestSneakyRangedStagingMoveTU)
+				: tuCostToReachPosition(travelTarget, _allPathFindingNodes);
+			Log(LOG_INFO) << "Brutal-AI wants to go from "
+						  << myPos
+						  << " to travel-target: " << travelTarget << " Remaining TUs: " << _unit->getTimeUnits() << " TU-cost: " << displayedMoveTU
+						  << (sneakyRangedDirectWalk ? " (sneaky-planned)" : "");
+			Log(LOG_INFO) << "My range is: "<<maxExtenderRangeWith(_unit, _unit->getTimeUnits()) <<" IAmPureMelee: " << IAmPureMelee;
 		if (_tuCostToReachClosestPositionToBreakLos != -1)
 			Log(LOG_INFO) << "I need to preserve " << _tuCostToReachClosestPositionToBreakLos << " to hide.";
 	}
