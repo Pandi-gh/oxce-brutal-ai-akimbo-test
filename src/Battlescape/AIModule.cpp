@@ -3797,9 +3797,8 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " remEnergy=" << remainingEnergy
 						<< " reserveTU=" << minShotTU
 						<< " reserveEnergy=" << minShotEnergy
-						<< " hidden=" << (hidden ? 1 : 0)
-						<< " losVisible=" << (losVisibleToEnemy ? 1 : 0)
-						<< " hasLOS=" << (hasLOS ? 1 : 0)
+							<< " hidden=" << (hidden ? 1 : 0)
+							<< " hasLOS=" << (hasLOS ? 1 : 0)
 						<< " currentDist=" << currentDistToTarget
 						<< " dist=" << distToTarget
 						<< " progress=" << progress
@@ -3966,6 +3965,7 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " cand=" << cand
 						<< " score=" << score
 						<< " hidden=" << (hidden ? 1 : 0)
+						<< " losVisible=" << (losVisibleToEnemy ? 1 : 0)
 						<< " hasLOS=" << (hasLOS ? 1 : 0)
 							<< " direct=" << (directAttack ? 1 : 0)
 							<< " moveMode=" << (int)candidateMoveMode
