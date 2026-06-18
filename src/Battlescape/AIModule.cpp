@@ -5177,6 +5177,7 @@ if (_traceAI)
 		int assaultRejectedTU = 0;
 			int assaultRejectedEnergy = 0;
 			int assaultRejectedBadSneakyAngle = 0;
+			int assaultReactionCapable = 0;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
@@ -5269,6 +5270,32 @@ if (_traceAI)
 							}
 							const int assaultMoveTU = assaultAlreadyThere ? 0 : _save->getPathfinding()->getTotalTUCost();
 							const int assaultMoveEnergy = assaultAlreadyThere ? 0 : _save->getPathfinding()->getTotalEnergyCost();
+							// Pandi: classify approach exposure before aborting the path. Endpoint
+							// visibility alone is misleading for window/side melee: the final tile may
+							// be geometrically visible, but the approach can be fully hidden behind a
+							// wall. Reaction risk during movement is mostly about the approach path.
+							int assaultApproachTileVisible = 0;
+							int assaultApproachLosVisible = 0;
+							int assaultApproachSteps = 0;
+							if (!assaultAlreadyThere)
+							{
+								std::vector<int> assaultPath = _save->getPathfinding()->copyPath();
+								Position tracePos = _unit->getPosition();
+								while (!assaultPath.empty())
+								{
+									int stepDir = assaultPath.back();
+									assaultPath.pop_back();
+									Position stepVec;
+									Pathfinding::directionToVector(stepDir, &stepVec);
+									tracePos += stepVec;
+									// Do not count the final attack tile here; it is evaluated separately.
+									if (tracePos == candidate) continue;
+									++assaultApproachSteps;
+									Tile* traceTile = _save->getTile(tracePos);
+									if (traceTile && traceTile->getVisible() > 0) ++assaultApproachTileVisible;
+									if (isPositionVisibleToEnemy(tracePos, true)) ++assaultApproachLosVisible;
+								}
+							}
 							_save->getPathfinding()->abortPath();
 							if (assaultMoveTU + hitTU > _unit->getTimeUnits())
 							{
@@ -5361,11 +5388,12 @@ if (_traceAI)
 						}
 							const bool badSneakyAngle = visible
 								&& (side == SIDE_FRONT || side == SIDE_LEFT_FRONT || side == SIDE_RIGHT_FRONT);
-							// Pandi: targetCanMeleeBack is diagnostic only. A side/rear melee target
-							// may counterattack after surviving, but the Sneaky attacker still gets
-							// the first swing if movement itself does not trigger a reaction. Do not
-							// reject good side/window attacks just because reverse melee range exists.
-							if (badSneakyAngle)
+								// Pandi: targetCanMeleeBack is diagnostic only. In this melee-plan layer
+								// we prefer side/window tiles with a hidden approach; the engine may still
+								// allow a counterattack after the first swing, but this must not make us
+								// fall back to the frontal Brutal path.
+								if (targetCanMeleeBack) ++assaultReactionCapable;
+								if (badSneakyAngle)
 							{
 								++assaultRejectedBadSneakyAngle;
 								if (_traceAI)
@@ -5381,17 +5409,26 @@ if (_traceAI)
 								}
 								continue;
 							}
-							float score = sideScore * 1000.0f + (_unit->getTimeUnits() - moveTU - hitTU) * 5.0f - moveTU;
-							if (visible) score *= 0.65f;
+								float score = sideScore * 1000.0f + (_unit->getTimeUnits() - moveTU - hitTU) * 5.0f - moveTU;
+								// Prefer the window/inside route: a geometrically visible final side tile is
+								// acceptable if the approach path itself stays out of player sight. Penalize
+								// exposed approach steps heavily so outside-side paths stop beating hidden
+								// inside/window paths merely because they are a few TU cheaper.
+								score += (assaultApproachLosVisible == 0 ? 700.0f : -650.0f * assaultApproachLosVisible);
+								score -= assaultApproachTileVisible * 250.0f;
+								if (visible) score *= 0.65f;
 							if (_traceAI)
 						{
 							Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE candidate unit=" << _unit->getId()
 								<< " pos=" << candidate
 								<< " side=" << (int)side
 								<< " visible=" << (visible ? 1 : 0)
-								<< " moveTU=" << moveTU
-									<< " moveEnergy=" << assaultMoveEnergy
-									<< " hitTU=" << hitTU
+									<< " moveTU=" << moveTU
+										<< " moveEnergy=" << assaultMoveEnergy
+										<< " approachLOS=" << assaultApproachLosVisible
+										<< " approachTileVisible=" << assaultApproachTileVisible
+										<< " approachSteps=" << assaultApproachSteps
+										<< " hitTU=" << hitTU
 										<< " hitEnergy=" << hitEnergy
 										<< " targetCanMeleeBack=" << (targetCanMeleeBack ? 1 : 0)
 										<< " moveMode=" << (int)assaultMoveMode
@@ -5414,10 +5451,10 @@ if (_traceAI)
 		}
 	}
 
-				if (_traceAI)
-				{
-					Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE assault search summary unit=" << _unit->getId()
-						<< " checked=" << assaultCandidatesChecked
+					if (_traceAI)
+					{
+						Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE assault search summary unit=" << _unit->getId()
+							<< " checked=" << assaultCandidatesChecked
 						<< " invalidTile=" << assaultRejectedInvalidTile
 						<< " badMeleeRange=" << assaultRejectedMeleeRange
 						<< " noFit=" << assaultRejectedFit
@@ -5425,6 +5462,7 @@ if (_traceAI)
 							<< " noTU=" << assaultRejectedTU
 							<< " noEnergy=" << assaultRejectedEnergy
 							<< " badAngle=" << assaultRejectedBadSneakyAngle
+							<< " reactionCapable=" << assaultReactionCapable
 							<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
