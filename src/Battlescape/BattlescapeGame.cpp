@@ -434,12 +434,16 @@ void BattlescapeGame::handleAI(BattleUnit *unit)
 
 		auto* targetTile = _save->getTile(action.target);
 		if (targetTile)
-		{
-			BattleActionMove bam = BAM_NORMAL;
-			if (Options::strafe && action.actor->isBrutal() && action.actor->getAIModule()->wantToRun())
-				bam = BAM_RUN;
-			_save->getPathfinding()->calculate(action.actor, action.target, bam);
-		}
+			{
+				// Pandi: preserve explicit movement mode chosen by AI planning.
+				// Sneaky ranged may validate a staging tile specifically with BAM_RUN even
+				// when generic wantToRun() is false; recalculating here as BAM_NORMAL made
+				// the unit walk a route that the planner had scored as a run.
+				BattleActionMove bam = action.getMoveType();
+				if (bam == BAM_NORMAL && Options::strafe && action.actor->isBrutal() && action.actor->getAIModule()->wantToRun())
+					bam = BAM_RUN;
+				_save->getPathfinding()->calculate(action.actor, action.target, bam);
+			}
 		if (_save->getPathfinding()->getStartDirection() != -1)
 		{
 			statePushBack(new UnitWalkBState(this, action));
