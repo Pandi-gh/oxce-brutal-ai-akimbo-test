@@ -5177,6 +5177,7 @@ if (_traceAI)
 		int assaultRejectedTU = 0;
 			int assaultRejectedEnergy = 0;
 			int assaultRejectedBadSneakyAngle = 0;
+			int assaultRejectedReactionBait = 0;
 	if (_unit->isSneakyRuntime() && IAmPureMelee && unitToWalkTo)
 	{
 		// Pandi: use the actual held melee weapon too. getUtilityWeapon(BT_MELEE)
@@ -5304,13 +5305,19 @@ if (_traceAI)
 							// Pandi: TileEngine::validMeleeRange uses the attacker's actual
 							// position for voxel origins. Temporarily move the unit to the
 							// candidate tile so window/side melee checks match real player usage.
-							const Position oldUnitPos = _unit->getPosition();
-							_save->setUnitPosition(_unit, candidate, false);
-							const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
-							Position meleeDest;
-							const bool meleeRangeValid = _save->getTileEngine()->validMeleeRange(candidate, dir, _unit, 0, &meleeDest, false)
-								&& meleeDest == unitToWalkTo->getPosition();
-							_save->setUnitPosition(_unit, oldUnitPos, false);
+								const Position oldUnitPos = _unit->getPosition();
+								_save->setUnitPosition(_unit, candidate, false);
+								const int dir = _save->getTileEngine()->getDirectionTo(candidate, unitToWalkTo->getPosition());
+								Position meleeDest;
+								const bool meleeRangeValid = _save->getTileEngine()->validMeleeRange(candidate, dir, _unit, 0, &meleeDest, false)
+									&& meleeDest == unitToWalkTo->getPosition();
+								// Pandi: while the attacker is temporarily placed on the candidate tile,
+								// also test the reverse melee line. This detects reaction-bait tiles:
+								// if the victim can melee back from its current tile, walking there may
+								// trigger a reaction punch before our post-move katana hit.
+								const int reverseDir = _save->getTileEngine()->getDirectionTo(unitToWalkTo->getPosition(), candidate);
+								const bool targetCanMeleeBack = _save->getTileEngine()->validMeleeRange(unitToWalkTo, _unit, reverseDir);
+								_save->setUnitPosition(_unit, oldUnitPos, false);
 							if (!meleeRangeValid)
 							{
 								++assaultRejectedMeleeRange;
@@ -5355,6 +5362,23 @@ if (_traceAI)
 						}
 							const bool badSneakyAngle = visible
 								&& (side == SIDE_FRONT || side == SIDE_LEFT_FRONT || side == SIDE_RIGHT_FRONT);
+							if (visible && targetCanMeleeBack)
+							{
+								++assaultRejectedReactionBait;
+								if (_traceAI)
+								{
+									Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE reject unit=" << _unit->getId()
+										<< " pos=" << candidate
+										<< " reason=reactionBait"
+										<< " side=" << (int)side
+										<< " visible=" << (visible ? 1 : 0)
+										<< " targetCanMeleeBack=" << (targetCanMeleeBack ? 1 : 0)
+										<< " moveTU=" << moveTU
+										<< " hitTU=" << hitTU
+										<< " moveMode=" << (int)assaultMoveMode;
+								}
+								continue;
+							}
 							if (badSneakyAngle)
 							{
 								++assaultRejectedBadSneakyAngle;
@@ -5381,9 +5405,10 @@ if (_traceAI)
 								<< " visible=" << (visible ? 1 : 0)
 								<< " moveTU=" << moveTU
 									<< " moveEnergy=" << assaultMoveEnergy
-								<< " hitTU=" << hitTU
-									<< " hitEnergy=" << hitEnergy
-									<< " moveMode=" << (int)assaultMoveMode
+									<< " hitTU=" << hitTU
+										<< " hitEnergy=" << hitEnergy
+										<< " targetCanMeleeBack=" << (targetCanMeleeBack ? 1 : 0)
+										<< " moveMode=" << (int)assaultMoveMode
 								<< " score=" << score;
 						}
 						if (score > sneakyMeleeAssaultScore)
@@ -5414,6 +5439,7 @@ if (_traceAI)
 							<< " noTU=" << assaultRejectedTU
 							<< " noEnergy=" << assaultRejectedEnergy
 							<< " badAngle=" << assaultRejectedBadSneakyAngle
+							<< " reactionBait=" << assaultRejectedReactionBait
 							<< " best=" << (sneakyMeleeAssaultOverride ? 1 : 0)
 						<< " moveMode=" << (int)sneakyMeleeAssaultMoveMode;
 				}
@@ -5470,9 +5496,14 @@ if (_traceAI)
 	}
 	else 	if (sneakyMeleeAssaultOverride)
 	{
-		travelTarget = sneakyMeleeAssaultPosition;
-		sneakyMeleeAssaultDirectWalk = true;
-		_allowedToCheckAttack = true;
+			travelTarget = sneakyMeleeAssaultPosition;
+			sneakyMeleeAssaultDirectWalk = true;
+			// Pandi: make UnitWalkBState treat this as a real charge. That prevents
+			// movement from stopping merely because the target becomes newly spotted,
+			// and lets postPathProcedures immediately enqueue the melee hit when range
+			// is reached. Reaction-bait tiles are filtered during candidate scoring.
+			_unit->setCharging(unitToWalkTo);
+			_allowedToCheckAttack = true;
 		if (_traceAI)
 		{
 			Log(LOG_INFO) << "[TRAIT] SNEAKY MELEE assault override unit=" << _unit->getId()
