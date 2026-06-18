@@ -3696,6 +3696,8 @@ void AIModule::brutalThink(BattleAction* action)
 	// unit can correctly choose an ambush tile and then spend itself down to 0-10 TU.
 	bool sneakyRangedReserveShotAfterMove = false;
 	bool sneakyRangedForceEndAfterMove = false;
+	bool sneakyRangedDirectWalk = false;
+	BattleActionMove sneakyRangedMoveMode = BAM_NORMAL;
 	int sneakyRangedReserveShotTU = 0;
 	int sneakyRangedReserveShotEnergy = 0;
 	// Pandi: diagnostic-only tracker for DynamicTraits Flanker. Keeps the
@@ -3773,6 +3775,7 @@ void AIModule::brutalThink(BattleAction* action)
 			int ambushRejectedNoCover = 0;
 			int ambushRejectedNoNextTurnThreat = 0;
 			bool watchedCandidateSeen = false;
+			BattleActionMove currentSneakySearchMoveMode = bam;
 
 			auto logWatched = [&](const char* reason, const Position& cand, Tile* candTile, int moveTU, int moveEnergy,
 				bool hidden, bool hasLOS, float distToTarget, float progress, float score, int remainingTU, int remainingEnergy)
@@ -3782,6 +3785,7 @@ void AIModule::brutalThink(BattleAction* action)
 					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched candidate unit=" << _unit->getId()
 						<< " cand=" << cand
 						<< " reason=" << reason
+						<< " moveMode=" << (int)currentSneakySearchMoveMode
 						<< " tile=" << (candTile ? 1 : 0)
 						<< " dangerous=" << (candTile && candTile->getDangerous() ? 1 : 0)
 						<< " fire=" << (candTile && candTile->getFire() ? 1 : 0)
@@ -3803,8 +3807,34 @@ void AIModule::brutalThink(BattleAction* action)
 				}
 			};
 
-			for (auto ambushPnf : _allPathFindingNodes)
+			// Pandi: evaluate Sneaky ambush/staging with the normal Brutal movement mode
+			// AND with RUN when armor supports it. wantToRun() can be conservative due
+			// to stamina heuristics, but a deliberate ambush may be valid only as a run
+			// along a hidden road/path (e.g. watched tile 45,32 in this test).
+			std::vector<PathfindingNode*> sneakyRunPathFindingNodes;
+			bool sneakyRunRanOut = false;
+			const Position sneakyAltStart = myPos;
+			const bool canSneakyTryRun = _unit->getArmor()->allowsRunning() && bam != BAM_RUN;
+			if (canSneakyTryRun)
 			{
+				sneakyRunPathFindingNodes = _save->getPathfinding()->findReachablePathFindingNodes(_unit, BattleActionCost(), sneakyRunRanOut, true, NULL, &sneakyAltStart, false, false, BAM_RUN);
+				if (_traceAI)
+				{
+					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED run-map unit=" << _unit->getId()
+						<< " nodes=" << sneakyRunPathFindingNodes.size()
+						<< " ranOut=" << (sneakyRunRanOut ? 1 : 0)
+						<< " baseBam=" << (int)bam;
+				}
+			}
+
+			for (int sneakyMapPass = 0; sneakyMapPass < (canSneakyTryRun ? 2 : 1); ++sneakyMapPass)
+			{
+				const BattleActionMove candidateMoveMode = (sneakyMapPass == 0 ? bam : BAM_RUN);
+				const std::vector<PathfindingNode*>& candidateNodes = (sneakyMapPass == 0 ? _allPathFindingNodes : sneakyRunPathFindingNodes);
+				currentSneakySearchMoveMode = candidateMoveMode;
+
+				for (auto ambushPnf : candidateNodes)
+				{
 				Position cand = ambushPnf->getPosition();
 				++ambushCandidatesChecked;
 				if (cand == watchedSneakyCandidate) watchedCandidateSeen = true;
@@ -3822,8 +3852,8 @@ void AIModule::brutalThink(BattleAction* action)
 					continue;
 				}
 
-				const int moveTU = tuCostToReachPosition(cand, _allPathFindingNodes);
-				const int moveEnergy = tuCostToReachPosition(cand, _allPathFindingNodes, NULL, false, true);
+				const int moveTU = tuCostToReachPosition(cand, candidateNodes);
+				const int moveEnergy = tuCostToReachPosition(cand, candidateNodes, NULL, false, true);
 				if (moveTU < 0 || moveTU > _unit->getTimeUnits())
 				{
 					++ambushRejectedMove;
@@ -3857,13 +3887,13 @@ void AIModule::brutalThink(BattleAction* action)
 					// Staging should be an approach ambush, not a random hidden tile. Require
 					// actual progress unless already very close to the target's last known zone.
 					const bool enoughProgressForStaging = progress >= 1.5f || distToTarget <= 8.0f;
-					// Pandi: do not stage in the middle of an empty hidden field. If the unit is
-					// not attacking this turn, the ambush tile must have at least some real cover.
-					const bool hasAmbushCover = cover > 0.0f;
 					// Pandi: staging should create a next-turn threat. For short weapons this
 					// prevents running to a distant hidden field with no way to attack next turn.
 					const float maxUsefulStagingDist = std::max(10.0f, weapRange * 2.0f + 3.0f);
 					const bool closeEnoughForNextTurnThreat = distToTarget <= maxUsefulStagingDist;
+					// Pandi: do not stage in the middle of an empty hidden field. If the tile is
+					// a close kill-zone for a short weapon, allow no formal cover; otherwise require cover.
+					const bool hasAmbushCover = cover > 0.0f || distToTarget <= weapRange + 1.5f;
 					const bool stagingCandidate = hidden && canReserveShot && enoughProgressForStaging && hasAmbushCover && closeEnoughForNextTurnThreat;
 
 					if (!directAttack && !hidden)
@@ -3929,8 +3959,9 @@ void AIModule::brutalThink(BattleAction* action)
 						<< " score=" << score
 						<< " hidden=" << (hidden ? 1 : 0)
 						<< " hasLOS=" << (hasLOS ? 1 : 0)
-						<< " direct=" << (directAttack ? 1 : 0)
-						<< " dist=" << distToTarget
+							<< " direct=" << (directAttack ? 1 : 0)
+							<< " moveMode=" << (int)candidateMoveMode
+							<< " dist=" << distToTarget
 						<< " progress=" << progress
 						<< " weapRange=" << weapRange
 						<< " moveTU=" << moveTU
@@ -3951,6 +3982,7 @@ void AIModule::brutalThink(BattleAction* action)
 					sneakyRangedAmbushMoveTU = moveTU;
 					sneakyRangedAmbushShotTU = minShotTU;
 					sneakyRangedAmbushHidden = hidden;
+					sneakyRangedMoveMode = candidateMoveMode;
 				}
 
 				if (!directAttack && stagingCandidate && score > bestSneakyRangedStagingScore)
@@ -3962,19 +3994,18 @@ void AIModule::brutalThink(BattleAction* action)
 					bestSneakyRangedStagingShotTU = minShotTU;
 					bestSneakyRangedStagingShotEnergy = minShotEnergy;
 					bestSneakyRangedStagingVisible = !hidden;
+					sneakyRangedMoveMode = candidateMoveMode;
 				}
 			}
+		}
 
 			if (_traceAI)
 			{
-				// Use alternateStart so diagnostics do not reset _nodes backing
-				// _allPathFindingNodes, which the rest of Brutal AI still needs.
-				bool watchedRanOut = false;
-				const Position watchedStart = myPos;
-				auto watchedNodes = _save->getPathfinding()->findReachablePathFindingNodes(_unit, BattleActionCost(), watchedRanOut, true, NULL, &watchedStart, false, false, bam);
-				int watchedTU = -1;
-				int watchedEnergy = -1;
-				for (auto watchedNode : watchedNodes)
+					// Diagnostics from the already-built node maps; do not run pathfinding here
+					// because it would overwrite _nodes/_altNodes backing the scored maps.
+					int watchedTU = -1;
+					int watchedEnergy = -1;
+					for (auto watchedNode : _allPathFindingNodes)
 				{
 					if (watchedNode->getPosition() == watchedSneakyCandidate)
 					{
@@ -3984,18 +4015,45 @@ void AIModule::brutalThink(BattleAction* action)
 					}
 				}
 				Tile* watchedTile = _save->getTile(watchedSneakyCandidate);
-				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched exact node unit=" << _unit->getId()
-					<< " cand=" << watchedSneakyCandidate
-					<< " found=" << (watchedTU >= 0 ? 1 : 0)
-					<< " totalTU=" << watchedTU
-					<< " totalEnergy=" << watchedEnergy
-					<< " ranOut=" << (watchedRanOut ? 1 : 0)
+					Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched exact node unit=" << _unit->getId()
+						<< " cand=" << watchedSneakyCandidate
+						<< " moveMode=" << (int)bam
+						<< " found=" << (watchedTU >= 0 ? 1 : 0)
+						<< " totalTU=" << watchedTU
+						<< " totalEnergy=" << watchedEnergy
+						<< " ranOut=0"
 					<< " tile=" << (watchedTile ? 1 : 0)
 					<< " visible=" << (watchedTile ? watchedTile->getVisible() : -999)
 					<< " dangerous=" << (watchedTile && watchedTile->getDangerous() ? 1 : 0)
-					<< " fire=" << (watchedTile && watchedTile->getFire() ? 1 : 0)
-					<< " noFloor=" << (watchedTile && watchedTile->hasNoFloor() ? 1 : 0);
-			}
+						<< " fire=" << (watchedTile && watchedTile->getFire() ? 1 : 0)
+						<< " noFloor=" << (watchedTile && watchedTile->hasNoFloor() ? 1 : 0);
+					if (canSneakyTryRun)
+					{
+						int watchedRunTU = -1;
+						int watchedRunEnergy = -1;
+						for (auto watchedNode : sneakyRunPathFindingNodes)
+						{
+							if (watchedNode->getPosition() == watchedSneakyCandidate)
+							{
+								watchedRunTU = watchedNode->getTUCost(false).time;
+								watchedRunEnergy = watchedNode->getTUCost(false).energy;
+								break;
+							}
+						}
+						Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched exact node unit=" << _unit->getId()
+							<< " cand=" << watchedSneakyCandidate
+							<< " moveMode=" << (int)BAM_RUN
+							<< " found=" << (watchedRunTU >= 0 ? 1 : 0)
+							<< " totalTU=" << watchedRunTU
+							<< " totalEnergy=" << watchedRunEnergy
+							<< " ranOut=" << (sneakyRunRanOut ? 1 : 0)
+							<< " tile=" << (watchedTile ? 1 : 0)
+							<< " visible=" << (watchedTile ? watchedTile->getVisible() : -999)
+							<< " dangerous=" << (watchedTile && watchedTile->getDangerous() ? 1 : 0)
+							<< " fire=" << (watchedTile && watchedTile->getFire() ? 1 : 0)
+							<< " noFloor=" << (watchedTile && watchedTile->hasNoFloor() ? 1 : 0);
+					}
+				}
 			if (_traceAI && !watchedCandidateSeen)
 			{
 				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED watched candidate unit=" << _unit->getId()
@@ -5315,20 +5373,23 @@ if (_traceAI)
 	if (_unit->isSneakyRuntime() && !IAmPureMelee && sneakyRangedAmbushScore > 0
 		&& sneakyRangedAmbushDirectAttack && sneakyRangedAmbushHidden)
 	{
-		travelTarget = sneakyRangedAmbushPosition;
-		_allowedToCheckAttack = true;
+			travelTarget = sneakyRangedAmbushPosition;
+			sneakyRangedDirectWalk = true;
+			_allowedToCheckAttack = true;
 		if (_traceAI)
 		{
 			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED direct ambush unit=" << _unit->getId()
 				<< " target=" << travelTarget
-				<< " score=" << sneakyRangedAmbushScore
-				<< " moveTU=" << sneakyRangedAmbushMoveTU
+					<< " score=" << sneakyRangedAmbushScore
+					<< " moveMode=" << (int)sneakyRangedMoveMode
+					<< " moveTU=" << sneakyRangedAmbushMoveTU
 				<< " shotTU=" << sneakyRangedAmbushShotTU;
 		}
 	}
 	else if (_unit->isSneakyRuntime() && !IAmPureMelee && bestAttackScore <= 0 && bestSneakyRangedStagingScore > 1200.0f)
 	{
 			travelTarget = bestSneakyRangedStagingPosition;
+			sneakyRangedDirectWalk = true;
 			shouldEndTurnAfterMove = true;
 			sneakyRangedForceEndAfterMove = true;
 			sneakyRangedReserveShotAfterMove = true;
@@ -5347,8 +5408,9 @@ if (_traceAI)
 			Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED staging override unit=" << _unit->getId()
 				<< " staging=" << bestSneakyRangedStagingPosition
 				<< " rejectedAttack=" << bestSneakyRangedRejectedAttackPosition
-				<< " score=" << bestSneakyRangedStagingScore
-				<< " stagingMoveTU=" << bestSneakyRangedStagingMoveTU
+					<< " score=" << bestSneakyRangedStagingScore
+					<< " moveMode=" << (int)sneakyRangedMoveMode
+					<< " stagingMoveTU=" << bestSneakyRangedStagingMoveTU
 					<< " reserveTU=" << sneakyRangedReserveShotTU
 					<< " reserveEnergy=" << sneakyRangedReserveShotEnergy
 					<< " visible=" << (bestSneakyRangedStagingVisible ? 1 : 0)
@@ -5484,9 +5546,22 @@ if (_traceAI)
 						<< " travelTarget=" << travelTarget;
 				}
 			}
-			if (sneakyMeleeAssaultDirectWalk)
-		{
-			// Pandi: one-turn Sneaky melee assault already proved the exact tile is
+				if (sneakyRangedDirectWalk)
+				{
+					// Pandi: Sneaky ranged plan was validated against its selected movement
+					// mode (often RUN even when generic wantToRun() is false). Go to the exact
+					// staged/attack tile; furthestToGoTowards() only has the normal node map.
+					action->target = travelTarget;
+					if (_traceAI)
+					{
+						Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED direct walk target unit=" << _unit->getId()
+							<< " target=" << action->target
+							<< " moveMode=" << (int)sneakyRangedMoveMode;
+					}
+				}
+				else if (sneakyMeleeAssaultDirectWalk)
+			{
+				// Pandi: one-turn Sneaky melee assault already proved the exact tile is
 			// reachable with enough TUs left to hit. Do not let furthestToGoTowards()
 			// shorten it back to the current/staging tile.
 			action->target = travelTarget;
@@ -5501,8 +5576,8 @@ if (_traceAI)
 		{
 			action->target = furthestToGoTowards(travelTarget, reserved, _allPathFindingNodes);
 		}
-		action->type = BA_WALK;
-		action->run = sneakyMeleeAssaultDirectWalk ? (sneakyMeleeAssaultMoveMode == BAM_RUN) : wantToRun();
+			action->type = BA_WALK;
+			action->run = sneakyRangedDirectWalk ? (sneakyRangedMoveMode == BAM_RUN) : (sneakyMeleeAssaultDirectWalk ? (sneakyMeleeAssaultMoveMode == BAM_RUN) : wantToRun());
 	} else
 	{
 		tryToPickUpGrenade(_unit->getTile(), action);
