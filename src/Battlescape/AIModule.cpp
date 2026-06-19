@@ -5411,11 +5411,11 @@ if (_traceAI)
 							}
 								float score = sideScore * 1000.0f + (_unit->getTimeUnits() - moveTU - hitTU) * 5.0f - moveTU;
 								// Prefer the window/inside route: a geometrically visible final side tile is
-								// acceptable if the approach path itself stays out of player sight. Penalize
-								// exposed approach steps heavily so outside-side paths stop beating hidden
-								// inside/window paths merely because they are a few TU cheaper.
-								score += (assaultApproachLosVisible == 0 ? 700.0f : -650.0f * assaultApproachLosVisible);
-								score -= assaultApproachTileVisible * 250.0f;
+								// acceptable if the approach path itself stays out of actual player FOV.
+								// Use Tile::getVisible for the decision, matching reaction/FOV state better
+								// than broad geometric LOS. `approachLOS` stays in logs as diagnostics only;
+								// in the katana-window test it falsely marks the wall-hidden inside route.
+								score += (assaultApproachTileVisible == 0 ? 900.0f : -900.0f * assaultApproachTileVisible);
 								if (visible) score *= 0.65f;
 							if (_traceAI)
 						{
