@@ -3768,6 +3768,7 @@ void AIModule::brutalThink(BattleAction* action)
 			int ambushCandidatesChecked = 0;
 			int ambushRejectedInvalidTile = 0;
 			int ambushRejectedNoFloor = 0;
+			int ambushRejectedNoFit = 0;
 			int ambushRejectedMove = 0;
 			int ambushRejectedEnergy = 0;
 			int ambushRejectedNotHidden = 0;
@@ -3855,6 +3856,16 @@ void AIModule::brutalThink(BattleAction* action)
 					logWatched("rejectNoFloor", cand, candTile, -1, -1, false, false, 0.0f, 0.0f, 0.0f, -1, -1);
 					continue;
 				}
+				// Pandi: ranged ambush/staging candidate must be a tile the shooter can
+				// actually stand on. The reachable node map can contain occupied tiles when
+				// built for whole-map scoring; without this, ranged Sneaky may select the
+				// target's own tile (dist=0) as a "direct ambush" position.
+				if (cand == targetPosition || !_save->setUnitPosition(_unit, cand, true))
+				{
+					++ambushRejectedNoFit;
+					logWatched(cand == targetPosition ? "rejectTargetTile" : "rejectNoFit", cand, candTile, -1, -1, false, false, 0.0f, 0.0f, 0.0f, -1, -1);
+					continue;
+				}
 
 				const int moveTU = tuCostToReachPosition(cand, candidateNodes);
 				const int moveEnergy = tuCostToReachPosition(cand, candidateNodes, NULL, false, true);
@@ -3903,7 +3914,7 @@ void AIModule::brutalThink(BattleAction* action)
 						// Brutal AI can handle long-range sniping; this layer is for close ambushes.
 						const float closeThreatRange = std::min(weapRange + 1.5f, 12.0f);
 						const float scoreRange = std::min(weapRange, 12.0f);
-						const bool directAttack = hasLOS && canReserveShot && distToTarget <= closeThreatRange;
+						const bool directAttack = hasLOS && canReserveShot && distToTarget >= 1.0f && distToTarget <= closeThreatRange;
 						const float cover = getCoverValue(candTile, _unit, 2);
 					// Pandi: strict hidden uses current player FOV. For staging only, also
 					// allow a close covered corner that has no firing LOS yet: it is not a
@@ -4093,9 +4104,10 @@ void AIModule::brutalThink(BattleAction* action)
 			{
 				Log(LOG_INFO) << "[TRAIT] SNEAKY RANGED ambush search unit=" << _unit->getId()
 					<< " checked=" << ambushCandidatesChecked
-					<< " invalidTile=" << ambushRejectedInvalidTile
-					<< " noFloor=" << ambushRejectedNoFloor
-					<< " badMoveTU=" << ambushRejectedMove
+						<< " invalidTile=" << ambushRejectedInvalidTile
+						<< " noFloor=" << ambushRejectedNoFloor
+						<< " noFit=" << ambushRejectedNoFit
+						<< " badMoveTU=" << ambushRejectedMove
 					<< " badMoveEnergy=" << ambushRejectedEnergy
 					<< " notHidden=" << ambushRejectedNotHidden
 						<< " noReserve=" << ambushRejectedNoReserve
@@ -5670,7 +5682,14 @@ if (_traceAI)
 				}
 				else if (sneakyMeleeAssaultDirectWalk)
 			{
-				// Pandi: one-turn Sneaky melee assault already proved the exact tile is
+					// Pandi: committed Sneaky melee assault. Do not cancel the route just
+					// because the target becomes newly spotted mid-approach; the assault
+					// planner already selected a side/window tile and reserved hit TU. Real
+					// reaction checks still happen, but spotting alone must not downgrade the
+					// plan into the normal frontal fallback.
+					action->desperate = true;
+					action->ignoreSpottedEnemies = true;
+					// Pandi: one-turn Sneaky melee assault already proved the exact tile is
 			// reachable with enough TUs left to hit. Do not let furthestToGoTowards()
 			// shorten it back to the current/staging tile.
 			action->target = travelTarget;
